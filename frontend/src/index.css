@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply m-0 bg-gray-950 text-gray-100 font-sans antialiased;
+  }
+
+  #root {
+    @apply h-screen w-screen overflow-hidden;
+  }
+}
+
+/* Leaflet overrides for dark theme */
+.leaflet-container {
+  background: #0f172a !important;
+}
+
+.leaflet-popup-content-wrapper {
+  @apply bg-gray-800 text-gray-100 rounded-lg shadow-xl border border-gray-700;
+}
+
+.leaflet-popup-tip {
+  background: #1f2937 !important;
+}
+
+.leaflet-popup-close-button {
+  color: #9ca3af !important;
+}
+
+/* Attack pin pulse animation */
+@keyframes attack-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.8);
+    opacity: 0.4;
+  }
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+
+.attack-pulse {
+  animation: attack-pulse 1.5s ease-out;
+}
+
+/* Marker cluster styles */
+.marker-cluster-small {
+  background-color: rgba(59, 130, 246, 0.3) !important;
+}
+.marker-cluster-small div {
+  background-color: rgba(59, 130, 246, 0.7) !important;
+  color: white !important;
+  font-weight: 600 !important;
+}
+
+.marker-cluster-medium {
+  background-color: rgba(245, 158, 11, 0.3) !important;
+}
+.marker-cluster-medium div {
+  background-color: rgba(245, 158, 11, 0.7) !important;
+  color: white !important;
+  font-weight: 600 !important;
+}
+
+.marker-cluster-large {
+  background-color: rgba(239, 68, 68, 0.3) !important;
+}
+.marker-cluster-large div {
+  background-color: rgba(239, 68, 68, 0.7) !important;
+  color: white !important;
+  font-weight: 600 !important;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
