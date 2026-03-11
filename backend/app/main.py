@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import engine, Base
-from app.routers import attempts, stats, geo, malware, stream
+from app.routers import attempts, stats, geo, malware, stream, admin, viewers
 from app.services.log_ingestion import tail_cowrie_log
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,8 @@ app.include_router(stats.router, prefix="/api/stats", tags=["Statistics"])
 app.include_router(geo.router, prefix="/api/geo", tags=["Geolocation"])
 app.include_router(malware.router, prefix="/api/malware", tags=["Malware"])
 app.include_router(stream.router, prefix="/api/stream", tags=["Real-time"])
+app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
+app.include_router(viewers.router, prefix="/api/stats", tags=["Statistics"])
 
 
 @app.get("/api/health")

@@ -97,6 +97,15 @@ class Session(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class PageView(Base):
+    __tablename__ = "page_views"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    visitor_ip = Column(String, nullable=False, index=True)
+    user_agent = Column(String)
+    visited_at = Column(DateTime, server_default=func.now(), index=True)
+
+
 class DailyStat(Base):
     __tablename__ = "daily_stats"
 

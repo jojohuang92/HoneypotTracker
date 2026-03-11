@@ -35,6 +35,7 @@ class GeoPin(BaseModel):
     count: int
     country_code: str | None = None
     country_name: str | None = None
+    city: str | None = None
     latest_timestamp: datetime | None = None
     latest_event_id: str | None = None
     latest_src_ip: str | None = None

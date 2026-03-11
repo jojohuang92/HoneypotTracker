@@ -15,8 +15,6 @@ def get_pins(
     db: DBSession = Depends(get_db),
 ):
     """Get map pins clustered by source IP (one pin per unique IP)."""
-    from sqlalchemy.orm import aliased
-
     # Subquery to get latest attempt per IP
     sub = (
         db.query(
@@ -35,6 +33,7 @@ def get_pins(
             Attempt.longitude,
             Attempt.country_code,
             Attempt.country_name,
+            Attempt.city,
             Attempt.event_id,
             Attempt.src_ip,
             sub.c.count,
@@ -53,6 +52,7 @@ def get_pins(
             count=r.count,
             country_code=r.country_code,
             country_name=r.country_name,
+            city=r.city,
             latest_timestamp=r.latest_timestamp,
             latest_event_id=r.event_id,
             latest_src_ip=r.src_ip,

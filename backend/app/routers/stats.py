@@ -172,10 +172,34 @@ def top_credentials(
     ]
 
 
+@router.get("/ports", response_model=list[dict])
+def top_ports(
+    limit: int = Query(10, ge=1, le=50),
+    db: DBSession = Depends(get_db),
+):
+    rows = (
+        db.query(
+            Attempt.dst_port,
+            func.count(Attempt.id).label("count"),
+        )
+        .filter(Attempt.dst_port.isnot(None))
+        .group_by(Attempt.dst_port)
+        .order_by(desc("count"))
+        .limit(limit)
+        .all()
+    )
+    total = sum(r.count for r in rows) or 1
+    return [
+        {"port": r.dst_port, "count": r.count, "percentage": round(r.count / total * 100, 1)}
+        for r in rows
+    ]
+
+
 @router.get("/timeline", response_model=list[TimelineBucket])
 def timeline(
     granularity: str = Query("hour", regex="^(hour|day)$"),
     days: int = Query(7, ge=1, le=90),
+    tz_offset: int = Query(0, ge=-720, le=840, description="Local UTC offset in minutes"),
     db: DBSession = Depends(get_db),
 ):
     since = datetime.utcnow() - timedelta(days=days)
@@ -185,9 +209,12 @@ def timeline(
     else:
         fmt = "%Y-%m-%d"
 
+    # Shift stored UTC timestamps into the caller's local timezone before bucketing
+    local_ts = func.datetime(Attempt.timestamp, f"{tz_offset:+d} minutes")
+
     rows = (
         db.query(
-            func.strftime(fmt, Attempt.timestamp).label("bucket"),
+            func.strftime(fmt, local_ts).label("bucket"),
             func.count(Attempt.id).label("count"),
         )
         .filter(Attempt.timestamp >= since)

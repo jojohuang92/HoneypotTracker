@@ -13,11 +13,24 @@ interface TimelineChartProps {
   data: TimelineBucket[];
 }
 
+function formatBucket(bucket: string): { label: string; full: string } {
+  // Buckets arrive already in local time from the backend
+  const isHourly = bucket.includes(" ");
+  if (isHourly) {
+    const [date, time] = bucket.split(" ");
+    const [, month, day] = date.split("-");
+    return { label: time, full: `${month}/${day} ${time}` };
+  } else {
+    const [, month, day] = bucket.split("-");
+    return { label: `${month}/${day}`, full: bucket };
+  }
+}
+
 export default function TimelineChart({ data }: TimelineChartProps) {
-  const formatted = data.map((d) => ({
-    ...d,
-    label: d.bucket.includes(" ") ? d.bucket.split(" ")[1] : d.bucket.split("-").slice(1).join("/"),
-  }));
+  const formatted = data.map((d) => {
+    const { label, full } = formatBucket(d.bucket);
+    return { ...d, label, full };
+  });
 
   return (
     <ResponsiveContainer width="100%" height="100%">
@@ -48,6 +61,7 @@ export default function TimelineChart({ data }: TimelineChartProps) {
             fontSize: "12px",
             color: "#e2e8f0",
           }}
+          labelFormatter={(_, payload) => payload?.[0]?.payload?.full ?? ""}
         />
         <Area
           type="monotone"

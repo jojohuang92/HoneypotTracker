@@ -2,7 +2,6 @@ import StatCard from "../common/StatCard";
 import TimelineChart from "../Charts/TimelineChart";
 import type { OverviewStats } from "../../types";
 import { useTimeline, useCredentials } from "../../hooks/useAttempts";
-
 interface OverviewPanelProps {
   stats: OverviewStats;
 }

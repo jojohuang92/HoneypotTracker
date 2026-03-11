@@ -28,6 +28,7 @@ export interface GeoPin {
   count: number;
   country_code: string | null;
   country_name: string | null;
+  city: string | null;
   latest_timestamp: string | null;
   latest_event_id: string | null;
   latest_src_ip: string | null;

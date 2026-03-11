@@ -12,7 +12,7 @@ export function useSSE(url: string) {
 
     es.onopen = () => setIsConnected(true);
 
-    es.addEventListener("new_attempt", (e) => {
+    es.addEventListener("new_attack", (e) => {
       try {
         setLastEvent(JSON.parse(e.data));
       } catch {

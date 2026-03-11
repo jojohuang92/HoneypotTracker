@@ -1,4 +1,4 @@
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap } from "react-leaflet";
 import MarkerClusterGroup from "react-leaflet-cluster";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -71,19 +71,32 @@ function NewAttackAnimator({ lastEvent }: NewAttackAnimatorProps) {
   return null;
 }
 
+function MapResizer({ width }: { width: number }) {
+  const map = useMap();
+  useEffect(() => {
+    map.invalidateSize();
+  }, [width, map]);
+  return null;
+}
+
 interface AttackMapProps {
   pins: GeoPin[];
   onPinClick?: (pin: GeoPin) => void;
   lastEvent?: Attempt | null;
+  containerWidth?: number;
 }
 
-export default function AttackMap({ pins, onPinClick, lastEvent }: AttackMapProps) {
+const WORLD_BOUNDS: L.LatLngBoundsExpression = [[-85, -180], [85, 180]];
+
+export default function AttackMap({ pins, onPinClick, lastEvent, containerWidth }: AttackMapProps) {
   return (
     <MapContainer
       center={[20, 0]}
       zoom={2}
       minZoom={2}
       maxZoom={18}
+      maxBounds={WORLD_BOUNDS}
+      maxBoundsViscosity={1.0}
       className="h-full w-full"
       zoomControl={true}
       scrollWheelZoom={true}
@@ -91,8 +104,10 @@ export default function AttackMap({ pins, onPinClick, lastEvent }: AttackMapProp
       <TileLayer
         attribution='&copy; <a href="https://carto.com/">CARTO</a>'
         url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+        noWrap={true}
       />
 
+      <MapResizer width={containerWidth ?? 0} />
       {lastEvent && <NewAttackAnimator lastEvent={lastEvent} />}
 
       <MarkerClusterGroup
@@ -110,10 +125,17 @@ export default function AttackMap({ pins, onPinClick, lastEvent }: AttackMapProp
               click: () => onPinClick?.(pin),
             }}
           >
+            <Tooltip direction="top" offset={[0, -6]} opacity={0.9}>
+              <span style={{ fontFamily: "monospace", fontSize: "12px" }}>
+                {[pin.city, pin.country_code].filter(Boolean).join(", ") || "Unknown"}
+                {" · "}
+                <strong>{pin.count}</strong>
+              </span>
+            </Tooltip>
             <Popup>
               <div className="min-w-[200px] text-sm">
                 <div className="font-bold text-white mb-1">
-                  {pin.country_name || "Unknown"}
+                  {[pin.city, pin.country_name].filter(Boolean).join(", ") || "Unknown"}
                   {pin.country_code && (
                     <span className="ml-1 text-gray-400 font-normal">
                       ({pin.country_code})

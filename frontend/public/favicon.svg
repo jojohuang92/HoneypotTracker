@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <path d="M16 2 L28 7 L28 17 C28 23.5 22.5 29 16 31 C9.5 29 4 23.5 4 17 L4 7 Z" fill="#1e293b" stroke="#ef4444" stroke-width="1.5"/>
+  <path d="M16 6 L25 10 L25 17 C25 22 21 26.5 16 28 C11 26.5 7 22 7 17 L7 10 Z" fill="#0f172a"/>
+  <text x="16" y="22" text-anchor="middle" font-size="13" font-family="monospace" fill="#ef4444" font-weight="bold">!</text>
+</svg>

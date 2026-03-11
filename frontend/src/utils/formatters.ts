@@ -1,5 +1,7 @@
 export function formatTimestamp(ts: string): string {
-  return new Date(ts).toLocaleString("en-US", {
+  // Append Z if no timezone info so the browser treats it as UTC
+  const utc = ts.endsWith("Z") || ts.includes("+") ? ts : ts + "Z";
+  return new Date(utc).toLocaleString(undefined, {
     month: "short",
     day: "numeric",
     hour: "2-digit",

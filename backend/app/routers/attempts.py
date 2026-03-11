@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import func, desc
 
@@ -54,4 +54,7 @@ def recent_attempts(
 
 @router.get("/{attempt_id}", response_model=AttemptOut)
 def get_attempt(attempt_id: int, db: DBSession = Depends(get_db)):
-    return db.query(Attempt).filter(Attempt.id == attempt_id).first()
+    attempt = db.query(Attempt).filter(Attempt.id == attempt_id).first()
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    return attempt

@@ -60,11 +60,17 @@ class GeoIPLookup:
             city_data = record.get("city", {})
             location = record.get("location", {})
             traits = record.get("traits", {})
+            subdivisions = record.get("subdivisions", [])
+
+            city = city_data.get("names", {}).get("en", "")
+            # Fall back to the first subdivision (state/province) when city is absent
+            if not city and subdivisions:
+                city = subdivisions[0].get("names", {}).get("en", "")
 
             return GeoResult(
                 country_code=country.get("iso_code", ""),
                 country_name=country.get("names", {}).get("en", ""),
-                city=city_data.get("names", {}).get("en", ""),
+                city=city,
                 latitude=location.get("latitude", 0.0),
                 longitude=location.get("longitude", 0.0),
                 asn=traits.get("autonomous_system_number"),

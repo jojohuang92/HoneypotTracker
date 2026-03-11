@@ -3,15 +3,7 @@ import { useAttempts } from "../../hooks/useAttempts";
 import { formatTimestamp } from "../../utils/formatters";
 
 export default function FilesAccessed() {
-  const { data, loading } = useAttempts(1, 200);
-
-  // Filter for file-related events
-  const fileEvents = data.items.filter(
-    (a) =>
-      a.event_id.includes("file_download") ||
-      a.event_id.includes("file_upload") ||
-      (a.command && /wget|curl|tftp|scp|ftp/i.test(a.command))
-  );
+  const { data, loading } = useAttempts(1, 100, "malware_deployment");
 
   if (loading) return <div className="text-gray-500 text-center py-8">Loading...</div>;
 
@@ -19,16 +11,16 @@ export default function FilesAccessed() {
     <div className="space-y-3">
       <h3 className="text-sm font-semibold text-gray-300">
         Files Accessed / Downloaded
-        <span className="ml-2 text-gray-500 font-normal">({fileEvents.length})</span>
+        <span className="ml-2 text-gray-500 font-normal">({data.total})</span>
       </h3>
 
-      {fileEvents.length === 0 ? (
+      {data.items.length === 0 ? (
         <div className="text-center text-gray-500 py-8 text-sm">
           No file access events found
         </div>
       ) : (
         <div className="space-y-1.5">
-          {fileEvents.map((f) => (
+          {data.items.map((f) => (
             <div
               key={f.id}
               className="bg-gray-800/50 rounded-lg p-2.5 border border-gray-700/50"

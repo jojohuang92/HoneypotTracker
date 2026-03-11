@@ -1,20 +1,26 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useAttempts } from "../../hooks/useAttempts";
 import { formatTimestamp, intentLabel, intentColor } from "../../utils/formatters";
 
 export default function AllAttemptsTable() {
   const [page, setPage] = useState(1);
   const { data, loading } = useAttempts(page, 50);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to top when data refreshes (new attempts arrive at top)
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [data]);
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto" ref={scrollRef}>
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-gray-900 z-10">
             <tr className="border-b border-gray-700">
               <th className="text-left p-2 text-gray-400 font-medium">Time</th>
               <th className="text-left p-2 text-gray-400 font-medium">IP</th>
-              <th className="text-left p-2 text-gray-400 font-medium">Country</th>
+              <th className="text-left p-2 text-gray-400 font-medium">Location</th>
               <th className="text-left p-2 text-gray-400 font-medium">Event</th>
               <th className="text-left p-2 text-gray-400 font-medium">Details</th>
               <th className="text-left p-2 text-gray-400 font-medium">Intent</th>
@@ -29,9 +35,16 @@ export default function AllAttemptsTable() {
                 <td className="p-2 font-mono text-gray-400 whitespace-nowrap">
                   {formatTimestamp(a.timestamp)}
                 </td>
-                <td className="p-2 font-mono text-cyan-400">{a.src_ip}</td>
-                <td className="p-2">
-                  <span className="text-gray-300">{a.country_code || "?"}</span>
+                <td className="p-2 font-mono text-cyan-400 whitespace-nowrap">
+                  {a.src_ip}{a.dst_port != null ? <span className="text-gray-500">:{a.dst_port}</span> : ""}
+                </td>
+                <td className="p-2 max-w-[120px]">
+                  <div className="text-gray-300 truncate">
+                    {a.city || a.country_name || a.country_code || "?"}
+                  </div>
+                  {a.city && (
+                    <div className="text-[10px] text-gray-500">{a.country_code}</div>
+                  )}
                 </td>
                 <td className="p-2 text-gray-300">
                   {a.event_id.replace("cowrie.", "")}
