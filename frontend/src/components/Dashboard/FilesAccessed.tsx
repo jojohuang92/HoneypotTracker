@@ -1,4 +1,4 @@
-import { useState } from "react";
+
 import { useAttempts } from "../../hooks/useAttempts";
 import { formatTimestamp } from "../../utils/formatters";
 

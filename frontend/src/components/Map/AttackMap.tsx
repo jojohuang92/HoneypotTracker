@@ -3,7 +3,7 @@ import MarkerClusterGroup from "react-leaflet-cluster";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { GeoPin, Attempt } from "../../types";
-import { formatTimestamp, intentColor } from "../../utils/formatters";
+import { formatTimestamp } from "../../utils/formatters";
 import { useEffect } from "react";
 
 // Fix default marker icons in bundled builds
