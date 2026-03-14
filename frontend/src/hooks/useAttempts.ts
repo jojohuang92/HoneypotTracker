@@ -10,6 +10,7 @@ import type {
   CapturedFile,
   TimelineBucket,
   CredentialPair,
+  UniqueIP,
 } from "../types";
 
 const POLL_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes
@@ -49,13 +50,42 @@ export function useGeoPins() {
   return useAPI<GeoPin[]>("/geo/pins?limit=500", []);
 }
 
-export function useAttempts(page = 1, limit = 50, intent?: string) {
-  const intentParam = intent ? `&intent=${encodeURIComponent(intent)}` : "";
-  return useAPI<PaginatedAttempts>(`/attempts?page=${page}&limit=${limit}${intentParam}`, {
+export interface AttemptFilters {
+  countries?: string[];
+  events?: string[];
+  intents?: string[];
+}
+
+export function useAttempts(page = 1, limit = 50, filters?: AttemptFilters) {
+  let params = `page=${page}&limit=${limit}`;
+  if (filters?.countries?.length) {
+    params += filters.countries.map((c) => `&country=${encodeURIComponent(c)}`).join("");
+  }
+  if (filters?.events?.length) {
+    params += filters.events.map((e) => `&event_id=${encodeURIComponent(e)}`).join("");
+  }
+  if (filters?.intents?.length) {
+    params += filters.intents.map((i) => `&intent=${encodeURIComponent(i)}`).join("");
+  }
+  return useAPI<PaginatedAttempts>(`/attempts?${params}`, {
     items: [],
     total: 0,
     page: 1,
     pages: 1,
+  });
+}
+
+export interface FilterOptions {
+  countries: { code: string; name: string }[];
+  events: string[];
+  intents: string[];
+}
+
+export function useFilterOptions() {
+  return useAPI<FilterOptions>("/attempts/filter-options", {
+    countries: [],
+    events: [],
+    intents: [],
   });
 }
 
@@ -76,7 +106,7 @@ export function useCredentials() {
 }
 
 export function useCapturedFiles() {
-  return useAPI<CapturedFile[]>("/malware/files?limit=50", []);
+  return useAPI<CapturedFile[]>("/malware/files", []);
 }
 
 export interface ViewerStats {
@@ -111,4 +141,8 @@ export function useTimeline(granularity = "hour", days = 7) {
     `/stats/timeline?granularity=${granularity}&days=${days}&tz_offset=${tzOffset}`,
     []
   );
+}
+
+export function useUniqueIPs() {
+  return useAPI<UniqueIP[]>("/ips?limit=100", []);
 }

@@ -198,7 +198,7 @@ def top_ports(
 @router.get("/timeline", response_model=list[TimelineBucket])
 def timeline(
     granularity: str = Query("hour", regex="^(hour|day)$"),
-    days: int = Query(7, ge=1, le=90),
+    days: float = Query(7, ge=0.1, le=90),
     tz_offset: int = Query(0, ge=-720, le=840, description="Local UTC offset in minutes"),
     db: DBSession = Depends(get_db),
 ):
@@ -206,8 +206,10 @@ def timeline(
 
     if granularity == "hour":
         fmt = "%Y-%m-%d %H:00"
+        step = timedelta(hours=1)
     else:
         fmt = "%Y-%m-%d"
+        step = timedelta(days=1)
 
     # Shift stored UTC timestamps into the caller's local timezone before bucketing
     local_ts = func.datetime(Attempt.timestamp, f"{tz_offset:+d} minutes")
@@ -223,4 +225,22 @@ def timeline(
         .all()
     )
 
-    return [TimelineBucket(bucket=r.bucket, count=r.count) for r in rows]
+    counts = {r.bucket: r.count for r in rows}
+
+    # Build the full range of buckets so gaps show as zero
+    offset_delta = timedelta(minutes=tz_offset)
+    local_now = datetime.utcnow() + offset_delta
+    local_since = since + offset_delta
+    # Truncate to the start of the current bucket
+    if granularity == "hour":
+        cursor = local_since.replace(minute=0, second=0, microsecond=0)
+    else:
+        cursor = local_since.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    result = []
+    while cursor <= local_now:
+        key = cursor.strftime(fmt)
+        result.append(TimelineBucket(bucket=key, count=counts.get(key, 0)))
+        cursor += step
+
+    return result

@@ -3,7 +3,7 @@ import { useAttempts } from "../../hooks/useAttempts";
 import { formatTimestamp } from "../../utils/formatters";
 
 export default function FilesAccessed() {
-  const { data, loading } = useAttempts(1, 100, "malware_deployment");
+  const { data, loading } = useAttempts(1, 100, { intents: ["malware_deployment"] });
 
   if (loading) return <div className="text-gray-500 text-center py-8">Loading...</div>;
 

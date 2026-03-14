@@ -97,6 +97,19 @@ export interface PaginatedAttempts {
   pages: number;
 }
 
+export interface UniqueIP {
+  src_ip: string;
+  count: number;
+  country_code: string | null;
+  country_name: string | null;
+  city: string | null;
+  latest_timestamp: string | null;
+  abuse_score: number | null;
+  isp: string | null;
+  usage_type: string | null;
+  total_reports: number | null;
+}
+
 export type DashboardTab =
   | "overview"
   | "attempts"
@@ -104,4 +117,5 @@ export type DashboardTab =
   | "intents"
   | "commands"
   | "files"
-  | "malware";
+  | "malware"
+  | "ips";

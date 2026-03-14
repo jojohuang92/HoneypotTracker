@@ -7,8 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import engine, Base
-from app.routers import attempts, stats, geo, malware, stream, admin, viewers
+from app.routers import attempts, stats, geo, malware, stream, admin, viewers, ips
 from app.services.log_ingestion import tail_cowrie_log
+from app.services.ip_lookup import auto_lookup_ips
 
 logger = logging.getLogger(__name__)
 
@@ -21,14 +22,20 @@ async def lifespan(app: FastAPI):
     ingestion_task = asyncio.create_task(tail_cowrie_log(settings.cowrie_log_path))
     logger.info("Cowrie log ingestion task started")
 
+    # Start automatic IP lookup service
+    ip_lookup_task = asyncio.create_task(auto_lookup_ips())
+    logger.info("Automatic IP lookup task started")
+
     yield
 
-    # Shutdown: cancel the ingestion task
+    # Shutdown: cancel background tasks
     ingestion_task.cancel()
-    try:
-        await ingestion_task
-    except asyncio.CancelledError:
-        pass
+    ip_lookup_task.cancel()
+    for task in (ingestion_task, ip_lookup_task):
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(
@@ -42,8 +49,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type", "X-Admin-Key"],
 )
 
 app.include_router(attempts.router, prefix="/api/attempts", tags=["Attempts"])
@@ -51,6 +58,7 @@ app.include_router(stats.router, prefix="/api/stats", tags=["Statistics"])
 app.include_router(geo.router, prefix="/api/geo", tags=["Geolocation"])
 app.include_router(malware.router, prefix="/api/malware", tags=["Malware"])
 app.include_router(stream.router, prefix="/api/stream", tags=["Real-time"])
+app.include_router(ips.router, prefix="/api/ips", tags=["IPs"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(viewers.router, prefix="/api/stats", tags=["Statistics"])
 

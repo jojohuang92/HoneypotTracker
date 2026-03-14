@@ -9,21 +9,55 @@ from app.schemas import AttemptOut, PaginatedAttempts
 router = APIRouter()
 
 
+@router.get("/filter-options")
+def filter_options(db: DBSession = Depends(get_db)):
+    """Return distinct values for country, event_id, and intent filters."""
+    countries = (
+        db.query(Attempt.country_code, Attempt.country_name)
+        .filter(Attempt.country_code.isnot(None), Attempt.country_code != "")
+        .distinct()
+        .order_by(Attempt.country_name)
+        .all()
+    )
+    events = (
+        db.query(Attempt.event_id)
+        .filter(Attempt.event_id.isnot(None))
+        .distinct()
+        .order_by(Attempt.event_id)
+        .all()
+    )
+    intents = (
+        db.query(Attempt.intent)
+        .filter(Attempt.intent.isnot(None), Attempt.intent != "")
+        .distinct()
+        .order_by(Attempt.intent)
+        .all()
+    )
+    return {
+        "countries": [{"code": c, "name": n} for c, n in countries],
+        "events": [r[0] for r in events],
+        "intents": [r[0] for r in intents],
+    }
+
+
 @router.get("", response_model=PaginatedAttempts)
 def list_attempts(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
-    country: str | None = None,
-    intent: str | None = None,
+    country: list[str] | None = Query(None),
+    intent: list[str] | None = Query(None),
+    event_id: list[str] | None = Query(None),
     ip: str | None = None,
     db: DBSession = Depends(get_db),
 ):
     query = db.query(Attempt)
 
     if country:
-        query = query.filter(Attempt.country_code == country)
+        query = query.filter(Attempt.country_code.in_(country))
     if intent:
-        query = query.filter(Attempt.intent == intent)
+        query = query.filter(Attempt.intent.in_(intent))
+    if event_id:
+        query = query.filter(Attempt.event_id.in_(event_id))
     if ip:
         query = query.filter(Attempt.src_ip == ip)
 

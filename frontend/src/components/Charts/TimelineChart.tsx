@@ -34,7 +34,7 @@ export default function TimelineChart({ data }: TimelineChartProps) {
 
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={formatted}>
+      <AreaChart data={formatted} margin={{ top: 5, right: 30, bottom: 0, left: 0 }}>
         <defs>
           <linearGradient id="attackGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
@@ -47,6 +47,7 @@ export default function TimelineChart({ data }: TimelineChartProps) {
           tick={{ fill: "#64748b", fontSize: 10 }}
           axisLine={{ stroke: "#334155" }}
           interval="preserveStartEnd"
+          padding={{ right: 10 }}
         />
         <YAxis
           tick={{ fill: "#64748b", fontSize: 10 }}
@@ -69,6 +70,9 @@ export default function TimelineChart({ data }: TimelineChartProps) {
           stroke="#ef4444"
           fill="url(#attackGrad)"
           strokeWidth={2}
+          isAnimationActive={false}
+          dot={false}
+          activeDot={{ r: 4, fill: "#ef4444", stroke: "#fff", strokeWidth: 1.5 }}
         />
       </AreaChart>
     </ResponsiveContainer>

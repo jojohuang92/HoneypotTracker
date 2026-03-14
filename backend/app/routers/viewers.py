@@ -11,12 +11,20 @@ router = APIRouter()
 
 
 def _get_visitor_ip(request: Request) -> str:
-    """Prefer the real IP set by nginx over the proxy IP."""
-    return (
+    """Extract visitor IP from trusted nginx headers, with validation."""
+    import ipaddress as _ipa
+
+    candidate = (
         request.headers.get("X-Real-IP")
         or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
         or (request.client.host if request.client else "unknown")
     )
+    # Validate it looks like a real IP address
+    try:
+        _ipa.ip_address(candidate)
+    except ValueError:
+        candidate = request.client.host if request.client else "unknown"
+    return candidate
 
 
 @router.post("/view")

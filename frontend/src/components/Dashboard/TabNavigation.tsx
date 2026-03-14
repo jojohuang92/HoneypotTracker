@@ -3,6 +3,7 @@ import type { DashboardTab } from "../../types";
 const TABS: { id: DashboardTab; label: string; icon: string }[] = [
   { id: "overview", label: "Overview", icon: "\u{1F4CA}" },
   { id: "attempts", label: "Attempts", icon: "\u{1F4CB}" },
+  { id: "ips", label: "IPs", icon: "\u{1F310}" },
   { id: "countries", label: "Countries", icon: "\u{1F30D}" },
   { id: "intents", label: "Intents", icon: "\u{1F3AF}" },
   { id: "commands", label: "Commands", icon: "\u{1F4BB}" },

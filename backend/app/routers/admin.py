@@ -1,12 +1,23 @@
 import ipaddress
+import secrets
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session as DBSession
 
+from app.config import settings
 from app.database import get_db
 from app.models import Attempt, CapturedFile, Session
 
 router = APIRouter()
+
+
+def _require_admin_key(x_admin_key: str = Header(...)) -> str:
+    """Validate the admin API key from the X-Admin-Key header."""
+    if not settings.admin_api_key:
+        raise HTTPException(status_code=503, detail="Admin API key not configured")
+    if not secrets.compare_digest(x_admin_key, settings.admin_api_key):
+        raise HTTPException(status_code=403, detail="Invalid admin API key")
+    return x_admin_key
 
 
 def _private_ips_in_db(db: DBSession) -> set[str]:
@@ -23,7 +34,10 @@ def _private_ips_in_db(db: DBSession) -> set[str]:
 
 
 @router.get("/private-ips")
-def list_private_ips(db: DBSession = Depends(get_db)):
+def list_private_ips(
+    _key: str = Depends(_require_admin_key),
+    db: DBSession = Depends(get_db),
+):
     """List all private IPs currently in the database."""
     private_ips = _private_ips_in_db(db)
     counts = {}
@@ -33,7 +47,10 @@ def list_private_ips(db: DBSession = Depends(get_db)):
 
 
 @router.delete("/private-ips")
-def delete_private_ips(db: DBSession = Depends(get_db)):
+def delete_private_ips(
+    _key: str = Depends(_require_admin_key),
+    db: DBSession = Depends(get_db),
+):
     """Delete all attempts, sessions, and captured files from private IPs."""
     private_ips = _private_ips_in_db(db)
     if not private_ips:

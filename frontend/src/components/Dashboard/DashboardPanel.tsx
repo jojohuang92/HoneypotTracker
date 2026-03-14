@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { DashboardTab, OverviewStats } from "../../types";
+import type { Attempt, DashboardTab, OverviewStats } from "../../types";
 import type { ViewerStats } from "../../hooks/useAttempts";
 import TabNavigation from "./TabNavigation";
 import OverviewPanel from "./OverviewPanel";
@@ -9,18 +9,20 @@ import IntentClassification from "./IntentClassification";
 import CommandRankings from "./CommandRankings";
 import FilesAccessed from "./FilesAccessed";
 import MalwarePanel from "./MalwarePanel";
+import IPAddresses from "./IPAddresses";
 import LiveClock from "../common/LiveClock";
 
 interface DashboardPanelProps {
   stats: OverviewStats;
   viewers: ViewerStats;
+  lastEvent: Attempt | null;
 }
 
-export default function DashboardPanel({ stats, viewers }: DashboardPanelProps) {
+export default function DashboardPanel({ stats, viewers, lastEvent }: DashboardPanelProps) {
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
 
   return (
-    <div className="h-full flex flex-col bg-gray-900 border-l border-gray-800">
+    <div className="h-full flex flex-col bg-gray-900 border-l border-gray-800 relative">
       {/* Header */}
       <div className="p-3 border-b border-gray-800 flex items-center justify-between">
         <div>
@@ -51,13 +53,14 @@ export default function DashboardPanel({ stats, viewers }: DashboardPanelProps) 
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-3">
-        {activeTab === "overview" && <OverviewPanel stats={stats} />}
+        {activeTab === "overview" && <OverviewPanel stats={stats} lastEvent={lastEvent} />}
         {activeTab === "attempts" && <AllAttemptsTable />}
         {activeTab === "countries" && <CountryRankings />}
         {activeTab === "intents" && <IntentClassification />}
         {activeTab === "commands" && <CommandRankings />}
         {activeTab === "files" && <FilesAccessed />}
         {activeTab === "malware" && <MalwarePanel />}
+        {activeTab === "ips" && <IPAddresses />}
       </div>
     </div>
   );

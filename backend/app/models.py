@@ -97,6 +97,17 @@ class Session(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class IPScore(Base):
+    __tablename__ = "ip_scores"
+
+    ip = Column(String, primary_key=True)
+    abuse_score = Column(Integer, nullable=False)
+    isp = Column(String)
+    usage_type = Column(String)
+    total_reports = Column(Integer, default=0)
+    fetched_at = Column(DateTime, server_default=func.now())
+
+
 class PageView(Base):
     __tablename__ = "page_views"
 

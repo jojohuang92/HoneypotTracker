@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     virustotal_api_key: str = ""
     abuseipdb_api_key: str = ""
 
+    admin_api_key: str = ""
+
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
     model_config = {"env_file": ".env"}

@@ -93,7 +93,7 @@ function App() {
 
       {/* Dashboard - Right Side */}
       <div style={{ width: dashWidth }} className="shrink-0">
-        <DashboardPanel stats={stats} viewers={viewers} />
+        <DashboardPanel stats={stats} viewers={viewers} lastEvent={lastEvent} />
       </div>
     </div>
   );

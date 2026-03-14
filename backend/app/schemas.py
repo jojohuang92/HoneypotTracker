@@ -100,6 +100,19 @@ class CapturedFileOut(BaseModel):
         from_attributes = True
 
 
+class UniqueIP(BaseModel):
+    src_ip: str
+    count: int
+    country_code: str | None = None
+    country_name: str | None = None
+    city: str | None = None
+    latest_timestamp: datetime | None = None
+    abuse_score: int | None = None
+    isp: str | None = None
+    usage_type: str | None = None
+    total_reports: int | None = None
+
+
 class PaginatedAttempts(BaseModel):
     items: list[AttemptOut]
     total: int
