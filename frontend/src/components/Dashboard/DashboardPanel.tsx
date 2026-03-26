@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Attempt, DashboardTab, OverviewStats } from "../../types";
-import type { ViewerStats } from "../../hooks/useAttempts";
+
 import TabNavigation from "./TabNavigation";
 import OverviewPanel from "./OverviewPanel";
 import AllAttemptsTable from "./AllAttemptsTable";
@@ -14,11 +14,10 @@ import LiveClock from "../common/LiveClock";
 
 interface DashboardPanelProps {
   stats: OverviewStats;
-  viewers: ViewerStats;
   lastEvent: Attempt | null;
 }
 
-export default function DashboardPanel({ stats, viewers, lastEvent }: DashboardPanelProps) {
+export default function DashboardPanel({ stats, lastEvent }: DashboardPanelProps) {
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
 
   return (
@@ -35,14 +34,14 @@ export default function DashboardPanel({ stats, viewers, lastEvent }: DashboardP
         </div>
         <div className="text-right">
           <LiveClock />
-          <div className="flex gap-3 justify-end mt-1">
+          {/* <div className="flex gap-3 justify-end mt-1">
             <span className="text-[10px] text-gray-500">
               <span className="text-gray-400">{viewers.unique_visitors.toLocaleString()}</span> total visitors
             </span>
             <span className="text-[10px] text-gray-500">
               <span className="text-gray-400">{viewers.views_today.toLocaleString()}</span> today
             </span>
-          </div>
+          </div> */}
         </div>
       </div>
 

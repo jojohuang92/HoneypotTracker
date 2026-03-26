@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import func, desc, distinct, case
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.database import get_db
 from app.models import Attempt
@@ -41,7 +41,10 @@ INTENT_MITRE = {
 
 @router.get("/overview", response_model=OverviewStats)
 def overview(db: DBSession = Depends(get_db)):
-    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    # "Today" resets at midnight PST (UTC-8)
+    pst = timezone(timedelta(hours=-8))
+    today_pst = datetime.now(pst).replace(hour=0, minute=0, second=0, microsecond=0)
+    today = today_pst.astimezone(timezone.utc).replace(tzinfo=None)
 
     total = db.query(func.count(Attempt.id)).scalar() or 0
     unique_ips = db.query(func.count(distinct(Attempt.src_ip))).scalar() or 0

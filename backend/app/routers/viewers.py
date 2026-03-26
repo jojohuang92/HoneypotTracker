@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session as DBSession
@@ -43,7 +43,10 @@ def get_viewers(db: DBSession = Depends(get_db)):
     """Return total and unique visitor counts."""
     total = db.query(func.count(PageView.id)).scalar() or 0
     unique = db.query(func.count(distinct(PageView.visitor_ip))).scalar() or 0
-    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    # "Today" resets at midnight PST (UTC-8)
+    pst = timezone(timedelta(hours=-8))
+    today_pst = datetime.now(pst).replace(hour=0, minute=0, second=0, microsecond=0)
+    today = today_pst.astimezone(timezone.utc).replace(tzinfo=None)
     today_total = (
         db.query(func.count(PageView.id))
         .filter(PageView.visited_at >= today)

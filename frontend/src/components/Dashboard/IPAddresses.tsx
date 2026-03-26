@@ -20,9 +20,33 @@ function scoreBg(score: number | null): string {
   return "bg-green-500/10";
 }
 
+type ScoreFilter = "all" | "critical" | "high" | "medium" | "low" | "unknown";
+type AttackSort = "most" | "least";
+
+const SCORE_FILTERS: { value: ScoreFilter; label: string; color: string }[] = [
+  { value: "all", label: "All", color: "text-gray-300" },
+  { value: "critical", label: "Critical (75+)", color: "text-red-400" },
+  { value: "high", label: "High (50–74)", color: "text-orange-400" },
+  { value: "medium", label: "Medium (25–49)", color: "text-yellow-400" },
+  { value: "low", label: "Low (<25)", color: "text-green-400" },
+  { value: "unknown", label: "Unknown", color: "text-gray-500" },
+];
+
+function matchesScoreFilter(score: number | null, filter: ScoreFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "unknown") return score === null;
+  if (score === null) return false;
+  if (filter === "critical") return score >= 75;
+  if (filter === "high") return score >= 50 && score < 75;
+  if (filter === "medium") return score >= 25 && score < 50;
+  return score < 25; // low
+}
+
 export default function IPAddresses() {
   const { data, loading, refresh } = useUniqueIPs();
   const [lookingUp, setLookingUp] = useState<Set<string>>(new Set());
+  const [scoreFilter, setScoreFilter] = useState<ScoreFilter>("all");
+  const [attackSort, setAttackSort] = useState<AttackSort>("most");
 
   const lookupScore = async (ip: string) => {
     setLookingUp((prev) => new Set(prev).add(ip));
@@ -49,12 +73,36 @@ export default function IPAddresses() {
 
   if (loading) return <div className="text-gray-500 text-center py-8">Loading...</div>;
 
+  const filtered = data
+    .filter((d) => matchesScoreFilter(d.abuse_score, scoreFilter))
+    .sort((a, b) => attackSort === "most" ? b.count - a.count : a.count - b.count);
   const missingCount = data.filter((d) => d.abuse_score === null).length;
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-gray-400">{data.length} unique IPs</span>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400">
+            {scoreFilter === "all" ? `${data.length} unique IPs` : `${filtered.length} of ${data.length} IPs`}
+          </span>
+          <select
+            value={scoreFilter}
+            onChange={(e) => setScoreFilter(e.target.value as ScoreFilter)}
+            className="text-xs bg-gray-800 border border-gray-600 rounded px-2 py-1 text-gray-300 focus:outline-none focus:border-blue-500"
+          >
+            {SCORE_FILTERS.map((f) => (
+              <option key={f.value} value={f.value}>{f.label}</option>
+            ))}
+          </select>
+          <select
+            value={attackSort}
+            onChange={(e) => setAttackSort(e.target.value as AttackSort)}
+            className="text-xs bg-gray-800 border border-gray-600 rounded px-2 py-1 text-gray-300 focus:outline-none focus:border-blue-500"
+          >
+            <option value="most">Most Attacks</option>
+            <option value="least">Least Attacks</option>
+          </select>
+        </div>
         {missingCount > 0 && (
           <button
             onClick={lookupAll}
@@ -80,7 +128,7 @@ export default function IPAddresses() {
             </tr>
           </thead>
           <tbody>
-            {data.map((ip) => (
+            {filtered.map((ip) => (
               <tr key={ip.src_ip} className={`border-b border-gray-800/50 hover:bg-gray-700/30 ${scoreBg(ip.abuse_score)}`}>
                 <td className="p-2 font-mono text-cyan-400 whitespace-nowrap">
                   {ip.src_ip}

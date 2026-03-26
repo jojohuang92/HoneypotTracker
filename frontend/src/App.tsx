@@ -1,4 +1,4 @@
-import { useOverview, useGeoPins, useViewers } from "./hooks/useAttempts";
+import { useOverview, useGeoPins } from "./hooks/useAttempts";
 import { useSSE } from "./hooks/useSSE";
 import AttackMap from "./components/Map/AttackMap";
 import DashboardPanel from "./components/Dashboard/DashboardPanel";
@@ -12,7 +12,7 @@ const DEFAULT_DASH_WIDTH = 480;
 function App() {
   const { data: stats } = useOverview();
   const { data: pins } = useGeoPins();
-  const { data: viewers } = useViewers();
+
   const { isConnected, lastEvent } = useSSE("/api/stream/events");
 
   // Record this page view once on mount
@@ -93,7 +93,7 @@ function App() {
 
       {/* Dashboard - Right Side */}
       <div style={{ width: dashWidth }} className="shrink-0">
-        <DashboardPanel stats={stats} viewers={viewers} lastEvent={lastEvent} />
+        <DashboardPanel stats={stats} lastEvent={lastEvent} />
       </div>
     </div>
   );
