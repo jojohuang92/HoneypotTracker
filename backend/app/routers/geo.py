@@ -1,16 +1,19 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import func, desc
 
 from app.database import get_db
 from app.models import Attempt
+from app.rate_limit import limiter
 from app.schemas import GeoPin
 
 router = APIRouter()
 
 
 @router.get("/pins", response_model=list[GeoPin])
+@limiter.limit("30/minute")
 def get_pins(
+    request: Request,
     limit: int = Query(500, ge=1, le=2000),
     db: DBSession = Depends(get_db),
 ):

@@ -4,10 +4,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
 from app.database import engine, Base
-from app.routers import attempts, stats, geo, malware, stream, admin, viewers, ips
+from app.rate_limit import limiter
+from app.routers import attempts, stats, geo, malware, stream, admin, viewers, ips, profile, search, replay
 from app.services.log_ingestion import tail_cowrie_log
 from app.services.ip_lookup import auto_lookup_ips
 
@@ -16,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    settings.validate_startup()
     Base.metadata.create_all(bind=engine)
 
     # Start Cowrie log ingestion as a background task
@@ -45,6 +49,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Rate limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -61,6 +69,9 @@ app.include_router(stream.router, prefix="/api/stream", tags=["Real-time"])
 app.include_router(ips.router, prefix="/api/ips", tags=["IPs"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(viewers.router, prefix="/api/stats", tags=["Statistics"])
+app.include_router(profile.router, prefix="/api/profile", tags=["Attacker Profile"])
+app.include_router(search.router, prefix="/api/search", tags=["Search"])
+app.include_router(replay.router, prefix="/api/replay", tags=["Session Replay"])
 
 
 @app.get("/api/health")

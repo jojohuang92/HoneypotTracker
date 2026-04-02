@@ -118,3 +118,48 @@ class PaginatedAttempts(BaseModel):
     total: int
     page: int
     pages: int
+
+
+# -- Attacker Profile --
+
+class SessionSummary(BaseModel):
+    session_id: str
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    duration_secs: float | None = None
+    login_attempts: int = 0
+    commands_run: int = 0
+    files_downloaded: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class AttackerProfile(BaseModel):
+    src_ip: str
+    country_code: str | None = None
+    country_name: str | None = None
+    city: str | None = None
+    asn: int | None = None
+    as_org: str | None = None
+    abuse_score: int | None = None
+    isp: str | None = None
+    first_seen: datetime | None = None
+    last_seen: datetime | None = None
+    total_attempts: int = 0
+    total_sessions: int = 0
+    total_commands: int = 0
+    total_files: int = 0
+    intents: list[IntentBreakdown] = []
+    top_commands: list[CommandRank] = []
+    top_credentials: list[CredentialPair] = []
+    sessions: list[SessionSummary] = []
+    timeline: list[TimelineBucket] = []
+
+
+# -- Search --
+
+class SearchResult(BaseModel):
+    items: list[AttemptOut]
+    total: int
+    query: str

@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import func, desc
 
 from app.database import get_db
 from app.models import Attempt, IPScore
+from app.rate_limit import limiter
 from app.schemas import UniqueIP
 from app.services.abuseipdb import get_cached_score, fetch_and_cache_score
 
@@ -11,7 +12,9 @@ router = APIRouter()
 
 
 @router.get("", response_model=list[UniqueIP])
+@limiter.limit("60/minute")
 def list_unique_ips(
+    request: Request,
     limit: int = Query(50, ge=1, le=200),
     db: DBSession = Depends(get_db),
 ):
@@ -58,7 +61,8 @@ def list_unique_ips(
 
 
 @router.post("/{ip}/score", response_model=UniqueIP | dict)
-def lookup_ip_score(ip: str, db: DBSession = Depends(get_db)):
+@limiter.limit("10/minute")
+def lookup_ip_score(request: Request, ip: str, db: DBSession = Depends(get_db)):
     """Fetch (or refresh) the AbuseIPDB score for a single IP."""
     score_row = fetch_and_cache_score(db, ip)
 

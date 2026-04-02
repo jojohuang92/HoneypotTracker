@@ -8,4 +8,9 @@ httpx==0.28.1
 python-magic==0.4.27
 watchfiles==1.0.4
 maxminddb==2.6.2
+slowapi==0.1.9
 zipp>=3.19.1 # not directly required, pinned by Snyk to avoid a vulnerability
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.25.0

@@ -9,6 +9,8 @@ const TABS: { id: DashboardTab; label: string; icon: string }[] = [
   { id: "commands", label: "Commands", icon: "\u{1F4BB}" },
   { id: "files", label: "Files", icon: "\u{1F4C1}" },
   { id: "malware", label: "Malware", icon: "\u{1F41B}" },
+  { id: "search", label: "Search", icon: "\u{1F50D}" },
+  { id: "profile", label: "Profile", icon: "\u{1F464}" },
 ];
 
 interface TabNavigationProps {

@@ -110,12 +110,52 @@ export interface UniqueIP {
   total_reports: number | null;
 }
 
+export interface SessionSummary {
+  session_id: string;
+  start_time: string | null;
+  end_time: string | null;
+  duration_secs: number | null;
+  login_attempts: number;
+  commands_run: number;
+  files_downloaded: number;
+}
+
+export interface AttackerProfile {
+  src_ip: string;
+  country_code: string | null;
+  country_name: string | null;
+  city: string | null;
+  asn: number | null;
+  as_org: string | null;
+  abuse_score: number | null;
+  isp: string | null;
+  first_seen: string | null;
+  last_seen: string | null;
+  total_attempts: number;
+  total_sessions: number;
+  total_commands: number;
+  total_files: number;
+  intents: IntentBreakdown[];
+  top_commands: CommandRank[];
+  top_credentials: CredentialPair[];
+  sessions: SessionSummary[];
+  timeline: TimelineBucket[];
+}
+
+export interface SearchResult {
+  items: Attempt[];
+  total: number;
+  query: string;
+}
+
 export type DashboardTab =
   | "overview"
   | "attempts"
+  | "search"
+  | "profile"
+  | "ips"
   | "countries"
   | "intents"
   | "commands"
   | "files"
-  | "malware"
-  | "ips";
+  | "malware";

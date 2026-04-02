@@ -6,6 +6,7 @@ from sqlalchemy import func, distinct
 
 from app.database import get_db
 from app.models import PageView
+from app.rate_limit import limiter
 
 router = APIRouter()
 
@@ -28,6 +29,7 @@ def _get_visitor_ip(request: Request) -> str:
 
 
 @router.post("/view")
+@limiter.limit("30/minute")
 def record_view(request: Request, db: DBSession = Depends(get_db)):
     """Record a page visit."""
     db.add(PageView(
@@ -39,7 +41,8 @@ def record_view(request: Request, db: DBSession = Depends(get_db)):
 
 
 @router.get("/viewers")
-def get_viewers(db: DBSession = Depends(get_db)):
+@limiter.limit("60/minute")
+def get_viewers(request: Request, db: DBSession = Depends(get_db)):
     """Return total and unique visitor counts."""
     total = db.query(func.count(PageView.id)).scalar() or 0
     unique = db.query(func.count(distinct(PageView.visitor_ip))).scalar() or 0

@@ -11,6 +11,9 @@ import type {
   TimelineBucket,
   CredentialPair,
   UniqueIP,
+  AttackerProfile,
+  SearchResult,
+  Attempt,
 } from "../types";
 
 const POLL_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes
@@ -20,18 +23,25 @@ function useAPI<T>(path: string, defaultValue: T) {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(() => {
+    if (!path) {
+      setData(defaultValue);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     fetchJSON<T>(path)
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
   useEffect(() => {
     refresh();
+    if (!path) return;
     const id = setInterval(refresh, POLL_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [refresh]);
+  }, [refresh, path]);
 
   return { data, loading, refresh };
 }
@@ -145,4 +155,25 @@ export function useTimeline(granularity = "hour", days = 7) {
 
 export function useUniqueIPs() {
   return useAPI<UniqueIP[]>("/ips?limit=100", []);
+}
+
+export function useAttackerProfile(ip: string) {
+  return useAPI<AttackerProfile | null>(
+    ip ? `/profile/${encodeURIComponent(ip)}` : "",
+    null
+  );
+}
+
+export function useSearch(query: string) {
+  return useAPI<SearchResult>(
+    query ? `/search?q=${encodeURIComponent(query)}&limit=100` : "",
+    { items: [], total: 0, query: "" }
+  );
+}
+
+export function useSessionReplay(sessionId: string) {
+  return useAPI<Attempt[]>(
+    sessionId ? `/replay/${encodeURIComponent(sessionId)}` : "",
+    []
+  );
 }

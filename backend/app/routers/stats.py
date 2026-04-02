@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import func, desc, distinct, case
 from datetime import datetime, timedelta, timezone
 
 from app.database import get_db
 from app.models import Attempt
+from app.rate_limit import limiter
 from app.schemas import (
     OverviewStats, CountryRank, IntentBreakdown,
     CommandRank, CredentialPair, TimelineBucket,
@@ -40,7 +41,8 @@ INTENT_MITRE = {
 
 
 @router.get("/overview", response_model=OverviewStats)
-def overview(db: DBSession = Depends(get_db)):
+@limiter.limit("60/minute")
+def overview(request: Request, db: DBSession = Depends(get_db)):
     # "Today" resets at midnight PST (UTC-8)
     pst = timezone(timedelta(hours=-8))
     today_pst = datetime.now(pst).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -69,7 +71,9 @@ def overview(db: DBSession = Depends(get_db)):
 
 
 @router.get("/countries", response_model=list[CountryRank])
+@limiter.limit("60/minute")
 def country_rankings(
+    request: Request,
     limit: int = Query(20, ge=1, le=100),
     db: DBSession = Depends(get_db),
 ):
@@ -100,7 +104,8 @@ def country_rankings(
 
 
 @router.get("/intents", response_model=list[IntentBreakdown])
-def intent_breakdown(db: DBSession = Depends(get_db)):
+@limiter.limit("60/minute")
+def intent_breakdown(request: Request, db: DBSession = Depends(get_db)):
     total = db.query(func.count(Attempt.id)).scalar() or 1
 
     rows = (
@@ -124,7 +129,9 @@ def intent_breakdown(db: DBSession = Depends(get_db)):
 
 
 @router.get("/commands", response_model=list[CommandRank])
+@limiter.limit("60/minute")
 def top_commands(
+    request: Request,
     limit: int = Query(20, ge=1, le=100),
     db: DBSession = Depends(get_db),
 ):
@@ -148,7 +155,9 @@ def top_commands(
 
 
 @router.get("/credentials", response_model=list[CredentialPair])
+@limiter.limit("60/minute")
 def top_credentials(
+    request: Request,
     limit: int = Query(20, ge=1, le=100),
     db: DBSession = Depends(get_db),
 ):
@@ -176,7 +185,9 @@ def top_credentials(
 
 
 @router.get("/ports", response_model=list[dict])
+@limiter.limit("60/minute")
 def top_ports(
+    request: Request,
     limit: int = Query(10, ge=1, le=50),
     db: DBSession = Depends(get_db),
 ):
@@ -199,8 +210,10 @@ def top_ports(
 
 
 @router.get("/timeline", response_model=list[TimelineBucket])
+@limiter.limit("30/minute")
 def timeline(
-    granularity: str = Query("hour", regex="^(hour|day)$"),
+    request: Request,
+    granularity: str = Query("hour", pattern="^(hour|day)$"),
     days: float = Query(7, ge=0.1, le=90),
     tz_offset: int = Query(0, ge=-720, le=840, description="Local UTC offset in minutes"),
     db: DBSession = Depends(get_db),

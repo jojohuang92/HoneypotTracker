@@ -10,6 +10,8 @@ import CommandRankings from "./CommandRankings";
 import FilesAccessed from "./FilesAccessed";
 import MalwarePanel from "./MalwarePanel";
 import IPAddresses from "./IPAddresses";
+import SearchPanel from "./SearchPanel";
+import AttackerProfilePanel from "./AttackerProfilePanel";
 import LiveClock from "../common/LiveClock";
 
 interface DashboardPanelProps {
@@ -19,6 +21,12 @@ interface DashboardPanelProps {
 
 export default function DashboardPanel({ stats, lastEvent }: DashboardPanelProps) {
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
+  const [profileIp, setProfileIp] = useState<string | undefined>();
+
+  const navigateToProfile = (ip: string) => {
+    setProfileIp(ip);
+    setActiveTab("profile");
+  };
 
   return (
     <div className="h-full flex flex-col bg-gray-900 border-l border-gray-800 relative">
@@ -59,6 +67,8 @@ export default function DashboardPanel({ stats, lastEvent }: DashboardPanelProps
         {activeTab === "commands" && <CommandRankings />}
         {activeTab === "files" && <FilesAccessed />}
         {activeTab === "malware" && <MalwarePanel />}
+        {activeTab === "search" && <SearchPanel onNavigateToProfile={navigateToProfile} />}
+        {activeTab === "profile" && <AttackerProfilePanel initialIp={profileIp} />}
         {activeTab === "ips" && <IPAddresses />}
       </div>
     </div>

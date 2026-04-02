@@ -1,16 +1,18 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import func, desc
 
 from app.database import get_db
 from app.models import Attempt
+from app.rate_limit import limiter
 from app.schemas import AttemptOut, PaginatedAttempts
 
 router = APIRouter()
 
 
 @router.get("/filter-options")
-def filter_options(db: DBSession = Depends(get_db)):
+@limiter.limit("60/minute")
+def filter_options(request: Request, db: DBSession = Depends(get_db)):
     """Return distinct values for country, event_id, and intent filters."""
     countries = (
         db.query(Attempt.country_code, Attempt.country_name)
@@ -41,7 +43,9 @@ def filter_options(db: DBSession = Depends(get_db)):
 
 
 @router.get("", response_model=PaginatedAttempts)
+@limiter.limit("60/minute")
 def list_attempts(
+    request: Request,
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
     country: list[str] | None = Query(None),
@@ -74,7 +78,9 @@ def list_attempts(
 
 
 @router.get("/recent", response_model=list[AttemptOut])
+@limiter.limit("60/minute")
 def recent_attempts(
+    request: Request,
     limit: int = Query(50, ge=1, le=200),
     db: DBSession = Depends(get_db),
 ):
@@ -87,7 +93,8 @@ def recent_attempts(
 
 
 @router.get("/{attempt_id}", response_model=AttemptOut)
-def get_attempt(attempt_id: int, db: DBSession = Depends(get_db)):
+@limiter.limit("60/minute")
+def get_attempt(request: Request, attempt_id: int, db: DBSession = Depends(get_db)):
     attempt = db.query(Attempt).filter(Attempt.id == attempt_id).first()
     if not attempt:
         raise HTTPException(status_code=404, detail="Attempt not found")
