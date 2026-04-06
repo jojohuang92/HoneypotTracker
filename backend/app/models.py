@@ -128,3 +128,14 @@ class DailyStat(Base):
     top_username = Column(String)
     top_password = Column(String)
     top_command = Column(String)
+
+
+class ReportLog(Base):
+    __tablename__ = "report_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    report_type = Column(String, nullable=False, index=True)  # "abuseipdb" or "virustotal"
+    identifier = Column(String, nullable=False, index=True)   # IP address or SHA256
+    reported_at = Column(DateTime, server_default=func.now())
+    success = Column(Boolean, default=True)
+    detail = Column(Text)  # API response or error message

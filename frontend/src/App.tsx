@@ -13,7 +13,7 @@ function App() {
   const { data: stats } = useOverview();
   const { data: pins } = useGeoPins();
 
-  const { isConnected, lastEvent } = useSSE("/api/stream/events");
+  const { isConnected, lastEvent } = useSSE("/api/stream/live");
 
   // Record this page view once on mount
   useEffect(() => {

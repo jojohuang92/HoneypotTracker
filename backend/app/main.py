@@ -13,6 +13,8 @@ from app.rate_limit import limiter
 from app.routers import attempts, stats, geo, malware, stream, admin, viewers, ips, profile, search, replay
 from app.services.log_ingestion import tail_cowrie_log
 from app.services.ip_lookup import auto_lookup_ips
+from app.services.abuse_reporter import auto_report_ips
+from app.services.vt_reporter import auto_report_files
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +32,18 @@ async def lifespan(app: FastAPI):
     ip_lookup_task = asyncio.create_task(auto_lookup_ips())
     logger.info("Automatic IP lookup task started")
 
+    # Start auto-reporting services
+    abuse_report_task = asyncio.create_task(auto_report_ips())
+    logger.info("AbuseIPDB auto-reporter started")
+
+    vt_report_task = asyncio.create_task(auto_report_files())
+    logger.info("VirusTotal auto-reporter started")
+
     yield
 
     # Shutdown: cancel background tasks
-    ingestion_task.cancel()
-    ip_lookup_task.cancel()
-    for task in (ingestion_task, ip_lookup_task):
+    for task in (ingestion_task, ip_lookup_task, abuse_report_task, vt_report_task):
+        task.cancel()
         try:
             await task
         except asyncio.CancelledError:

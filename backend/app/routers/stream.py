@@ -41,3 +41,22 @@ async def event_stream(token: str = Query(None)):
             raise
 
     return EventSourceResponse(generate())
+
+
+@router.get("/live")
+async def public_live_stream():
+    """Public read-only SSE stream — only forwards new_attack events."""
+    queue: asyncio.Queue = asyncio.Queue()
+    subscribers.append(queue)
+
+    async def generate():
+        try:
+            while True:
+                event = await queue.get()
+                if event.get("event") == "new_attack":
+                    yield event
+        except asyncio.CancelledError:
+            subscribers.remove(queue)
+            raise
+
+    return EventSourceResponse(generate())
