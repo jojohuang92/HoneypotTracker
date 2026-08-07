@@ -1,5 +1,6 @@
 """Tests for the Cowrie log ingestion pipeline."""
 
+import asyncio
 from datetime import datetime
 from unittest.mock import patch, MagicMock
 
@@ -10,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base
 from app.models import Attempt, CapturedFile, Session
 from app.services.log_ingestion import (
+    _dispatch,
     _is_private_ip,
     _parse_timestamp,
     _process_event,
@@ -95,7 +97,12 @@ class TestParseTimestamp:
 
     def test_iso_with_offset(self):
         dt = _parse_timestamp("2025-01-15T08:23:45.123456+0000")
-        assert dt.year == 2025
+        assert dt == datetime(2025, 1, 15, 8, 23, 45, 123456)
+        assert dt.tzinfo is None
+
+    def test_iso_with_non_utc_offset_converts_to_utc(self):
+        dt = _parse_timestamp("2025-01-15T08:23:45+02:00")
+        assert dt == datetime(2025, 1, 15, 6, 23, 45)
         assert dt.tzinfo is None
 
     def test_malformed_returns_now(self):
@@ -128,6 +135,22 @@ class TestProcessSessionConnect:
         sess = db.query(Session).filter_by(session_id="abc123").first()
         assert sess is not None
         assert sess.country_code == "US"
+
+    def test_duplicate_session_connect_is_noop(self, db):
+        event = {
+            "eventid": "cowrie.session.connect",
+            "session": "abc123",
+            "src_ip": "1.2.3.4",
+            "timestamp": "2025-06-15T10:00:00Z",
+            "protocol": "ssh",
+        }
+        with _patch_geoip():
+            payload, _ = _process_event(event, db)
+            duplicate_payload, _ = _process_event(event, db)
+
+        assert payload is not None
+        assert duplicate_payload is None
+        assert db.query(Session).filter_by(session_id="abc123").count() == 1
 
     def test_skips_private_ip(self, db):
         event = {
@@ -175,6 +198,29 @@ class TestProcessLogin:
         sess = db.query(Session).filter_by(session_id="s1").first()
         assert sess.login_attempts == 1
 
+    def test_duplicate_login_is_noop(self, db):
+        db.add(Session(session_id="s1", src_ip="1.2.3.4",
+                       start_time=datetime(2025, 6, 15), protocol="ssh"))
+        db.commit()
+
+        event = {
+            "eventid": "cowrie.login.failed",
+            "session": "s1",
+            "src_ip": "1.2.3.4",
+            "timestamp": "2025-06-15T10:00:00Z",
+            "username": "root",
+            "password": "toor",
+        }
+        with _patch_geoip():
+            _process_event(event, db)
+            payload, _ = _process_event(event, db)
+
+        assert payload is None
+        assert db.query(Attempt).count() == 1
+        sess = db.query(Session).filter_by(session_id="s1").first()
+        assert sess.login_attempts == 1
+
+
     def test_successful_login(self, db):
         db.add(Session(session_id="s1", src_ip="1.2.3.4",
                        start_time=datetime(2025, 6, 15), protocol="ssh"))
@@ -220,6 +266,27 @@ class TestProcessCommand:
         assert payload["intent"] == "reconnaissance"
         assert payload["command"] == "uname -a"
 
+        sess = db.query(Session).filter_by(session_id="s1").first()
+        assert sess.commands_run == 1
+
+    def test_duplicate_command_is_noop(self, db):
+        db.add(Session(session_id="s1", src_ip="1.2.3.4",
+                       start_time=datetime(2025, 6, 15), protocol="ssh"))
+        db.commit()
+
+        event = {
+            "eventid": "cowrie.command.input",
+            "session": "s1",
+            "src_ip": "1.2.3.4",
+            "timestamp": "2025-06-15T10:00:00Z",
+            "input": "uname -a",
+        }
+        with _patch_geoip():
+            _process_event(event, db)
+            payload, _ = _process_event(event, db)
+
+        assert payload is None
+        assert db.query(Attempt).count() == 1
         sess = db.query(Session).filter_by(session_id="s1").first()
         assert sess.commands_run == 1
 
@@ -324,3 +391,44 @@ class TestIncrementSessionField:
     def test_no_session_is_noop(self, db):
         # Should not raise
         _increment_session_field(db, "nonexistent", "login_attempts")
+
+
+# ---------------------------------------------------------------------------
+# _dispatch — fan-out to SSE, Splunk, and VT enrichment
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestDispatch:
+    async def test_publishes_sse_and_forwards_to_splunk(self):
+        """sse_payload present → publish_event and splunk_forwarder.send both invoked."""
+        payload = {"type": "login_attempt", "src_ip": "1.2.3.4"}
+
+        from unittest.mock import AsyncMock
+        with patch("app.services.log_ingestion.publish_event") as mock_publish, \
+             patch("app.services.log_ingestion.splunk_forwarder.send", new_callable=AsyncMock) as mock_send:
+            tasks = _dispatch(payload, None)
+            await asyncio.gather(*tasks)
+
+        mock_publish.assert_called_once_with("new_attack", payload)
+        # Fire-and-forget: we check the call happened, not that it finished
+        mock_send.assert_called_once_with(payload)
+
+    async def test_no_payload_skips_fanout(self):
+        from unittest.mock import AsyncMock
+        with patch("app.services.log_ingestion.publish_event") as mock_publish, \
+             patch("app.services.log_ingestion.splunk_forwarder.send", new_callable=AsyncMock) as mock_send:
+            tasks = _dispatch(None, None)
+
+        mock_publish.assert_not_called()
+        mock_send.assert_not_called()
+        assert tasks == []
+
+    async def test_captured_file_triggers_vt_enrichment(self):
+        from unittest.mock import AsyncMock
+        with patch("app.services.log_ingestion.publish_event"), \
+             patch("app.services.log_ingestion.splunk_forwarder.send", new_callable=AsyncMock), \
+             patch("app.services.log_ingestion.enrich_captured_file", new_callable=AsyncMock) as mock_vt:
+            tasks = _dispatch({"type": "file_download"}, 42)
+            await asyncio.gather(*tasks)
+
+        mock_vt.assert_called_once_with(42)

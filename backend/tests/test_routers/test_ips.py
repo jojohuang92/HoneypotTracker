@@ -37,3 +37,33 @@ class TestListUniqueIPs:
         make_attempt(db_session, src_ip="1.1.1.1")
         resp = client.get("/api/ips")
         assert resp.json()[0]["abuse_score"] is None
+
+    def test_returns_all_ips_when_no_limit(self, client, db_session):
+        for i in range(250):
+            make_attempt(db_session, src_ip=f"10.0.{i // 256}.{i % 256}", session_id=f"s{i}")
+        resp = client.get("/api/ips")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 250
+
+    def test_limit_param_caps_results(self, client, db_session):
+        for i in range(10):
+            make_attempt(db_session, src_ip=f"10.0.0.{i}", session_id=f"s{i}")
+        resp = client.get("/api/ips?limit=3")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 3
+
+
+class TestLookupIPScore:
+    """Input validation: junk must be rejected before any API quota is spent."""
+
+    def test_rejects_non_ip_string(self, client, db_session):
+        resp = client.post("/api/ips/not-an-ip/score")
+        assert resp.status_code == 400
+
+    def test_rejects_private_ip(self, client, db_session):
+        resp = client.post("/api/ips/192.168.1.1/score")
+        assert resp.status_code == 400
+
+    def test_rejects_loopback(self, client, db_session):
+        resp = client.post("/api/ips/127.0.0.1/score")
+        assert resp.status_code == 400

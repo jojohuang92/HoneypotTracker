@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -9,6 +10,7 @@ import httpx
 from app.config import settings
 from app.database import SessionLocal
 from app.models import CapturedFile, ReportLog
+from app.services.virustotal import enrich_captured_file
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +24,14 @@ SCAN_INTERVAL = 120
 
 # Max file size to upload (32 MB — VT limit for standard endpoint)
 MAX_FILE_SIZE = 32 * 1024 * 1024
+
+# Keep re-querying VT for analysis results this long after capture. Fresh
+# samples 404 until VT finishes analyzing; anything still unanalyzed after
+# this window is presumed to never get a verdict.
+ENRICH_RETRY_WINDOW = timedelta(days=2)
+
+# Max enrichment re-queries per scan cycle (keeps within VT rate limits)
+ENRICH_BATCH = 5
 
 
 def _was_already_submitted(db, sha256: str) -> bool:
@@ -38,11 +48,33 @@ def _was_already_submitted(db, sha256: str) -> bool:
     )
 
 
-def _upload_file(file_path: str, filename: str) -> tuple[bool, str]:
+def _resolve_file_path(local_path: str, sha256: str) -> Path | None:
+    """Locate a captured file on disk.
+
+    Cowrie logs 'outfile' relative to its own working directory, so the
+    stored path usually doesn't resolve from here. Cowrie names downloads
+    by their sha256, so fall back to <cowrie_downloads_dir>/<sha256>.
+    """
+    path = Path(local_path)
+    if path.is_absolute():
+        return path if path.exists() else None
+
+    if settings.cowrie_downloads_dir:
+        for candidate in (
+            Path(settings.cowrie_downloads_dir) / sha256,
+            Path(settings.cowrie_downloads_dir) / path.name,
+        ):
+            if candidate.exists():
+                return candidate
+
+    return path if path.exists() else None
+
+
+def _upload_file(file_path: str, filename: str, sha256: str) -> tuple[bool, str]:
     """Upload a file to VirusTotal. Returns (success, detail)."""
     try:
-        path = Path(file_path)
-        if not path.exists():
+        path = _resolve_file_path(file_path, sha256)
+        if path is None:
             return False, f"File not found: {file_path}"
 
         if path.stat().st_size > MAX_FILE_SIZE:
@@ -111,7 +143,12 @@ async def auto_report_files():
                     if _was_already_submitted(db, sha256):
                         continue
 
-                    success, detail = _upload_file(local_path, filename)
+                    success, detail = await asyncio.to_thread(
+                        _upload_file,
+                        local_path,
+                        filename,
+                        sha256,
+                    )
 
                     log_entry = ReportLog(
                         report_type="virustotal",
@@ -131,6 +168,29 @@ async def auto_report_files():
                 finally:
                     db.close()
 
+                await asyncio.sleep(API_DELAY)
+
+            # Re-query VT for recent files whose analysis hasn't landed yet.
+            # A fresh upload 404s until VT finishes scanning, so the initial
+            # ingestion-time enrichment finds nothing — poll until it lands.
+            db = SessionLocal()
+            try:
+                pending_ids = [
+                    row[0]
+                    for row in db.query(CapturedFile.id)
+                    .filter(
+                        CapturedFile.analyzed_at.is_(None),
+                        CapturedFile.sha256.isnot(None),
+                        CapturedFile.created_at >= datetime.utcnow() - ENRICH_RETRY_WINDOW,
+                    )
+                    .limit(ENRICH_BATCH)
+                    .all()
+                ]
+            finally:
+                db.close()
+
+            for file_id in pending_ids:
+                await enrich_captured_file(file_id)
                 await asyncio.sleep(API_DELAY)
 
         except Exception as e:

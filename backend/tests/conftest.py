@@ -64,7 +64,7 @@ def client(_shared_connection):
     """Create a TestClient that shares the same DB connection as db_session."""
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from app.routers import attempts, stats, geo, malware, admin, viewers, ips, profile, search, replay
+    from app.routers import attempts, stats, geo, malware, admin, viewers, ips, profile, search, replay, meta, export
 
     TestSession = sessionmaker(bind=_shared_connection)
 
@@ -91,6 +91,8 @@ def client(_shared_connection):
     app.include_router(profile.router, prefix="/api/profile")
     app.include_router(search.router, prefix="/api/search")
     app.include_router(replay.router, prefix="/api/replay")
+    app.include_router(meta.router, prefix="/api/meta")
+    app.include_router(export.router, prefix="/api/export")
 
     return TestClient(app)
 

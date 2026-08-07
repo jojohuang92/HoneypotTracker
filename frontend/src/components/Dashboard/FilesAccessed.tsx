@@ -1,23 +1,30 @@
-
+import { Link } from "react-router-dom";
+import { FolderOpen } from "lucide-react";
 import { useAttempts } from "../../hooks/useAttempts";
-import { formatTimestamp } from "../../utils/formatters";
+import { useTimeRange } from "../../context/TimeRangeContext";
+import { formatTimestamp, formatNumber } from "../../utils/formatters";
+import Skeleton from "../common/Skeleton";
+import EmptyState from "../common/EmptyState";
 
 export default function FilesAccessed() {
-  const { data, loading } = useAttempts(1, 100, { intents: ["malware_deployment"] });
+  const { range } = useTimeRange();
+  const { data, loading } = useAttempts(1, 100, { intents: ["malware_deployment"] }, range.days);
 
-  if (loading) return <div className="text-gray-500 text-center py-8">Loading...</div>;
+  if (loading && data.items.length === 0) return <Skeleton rows={10} />;
 
   return (
     <div className="space-y-3">
       <h3 className="text-sm font-semibold text-gray-300">
         Files Accessed / Downloaded
-        <span className="ml-2 text-gray-500 font-normal">({data.total})</span>
+        <span className="ml-2 text-gray-500 font-normal">({formatNumber(data.total)})</span>
       </h3>
 
       {data.items.length === 0 ? (
-        <div className="text-center text-gray-500 py-8 text-sm">
-          No file access events found
-        </div>
+        <EmptyState
+          icon={FolderOpen}
+          title="No file activity in this range"
+          hint="File events appear when attackers fetch or touch payloads. Widen the time range to see older activity."
+        />
       ) : (
         <div className="space-y-1.5">
           {data.items.map((f) => (
@@ -32,7 +39,12 @@ export default function FilesAccessed() {
               </div>
               <div className="flex items-center gap-3 mt-1 text-[10px] text-gray-500">
                 <span>{formatTimestamp(f.timestamp)}</span>
-                <span className="font-mono">{f.src_ip}</span>
+                <Link
+                  to={`/profile/${encodeURIComponent(f.src_ip)}`}
+                  className="font-mono text-cyan-500 hover:text-cyan-300 hover:underline"
+                >
+                  {f.src_ip}
+                </Link>
                 <span>{f.country_code}</span>
               </div>
             </div>

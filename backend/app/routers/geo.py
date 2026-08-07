@@ -18,14 +18,18 @@ def get_pins(
     db: DBSession = Depends(get_db),
 ):
     """Get map pins clustered by source IP (one pin per unique IP)."""
-    # Subquery to get latest attempt per IP
+    # Subquery to get latest attempt per IP. Rows ingested before the
+    # geoip fix stored unknown locations as 0.0/0.0 — exclude those too.
     sub = (
         db.query(
             Attempt.src_ip,
             func.count(Attempt.id).label("count"),
             func.max(Attempt.timestamp).label("latest_timestamp"),
         )
-        .filter(Attempt.latitude.isnot(None))
+        .filter(
+            Attempt.latitude.isnot(None),
+            ~((Attempt.latitude == 0) & (Attempt.longitude == 0)),
+        )
         .group_by(Attempt.src_ip)
         .subquery()
     )

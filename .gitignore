@@ -2,7 +2,7 @@
 __pycache__/
 *.py[cod]
 backend/venv/
-backend/data/
+backend/data
 *.db
 
 # Node
@@ -22,3 +22,6 @@ frontend/dist/
 
 # Claude
 .claude
+
+# Codex
+.codex

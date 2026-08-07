@@ -5,14 +5,9 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Honeypot Tracker</title>
-    <!-- Google Analytics -->
+    <!-- Google Analytics (init lives in public/gtag-init.js so the CSP can stay free of 'unsafe-inline') -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-ZZB1HLYXVJ"></script>
-    <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-      gtag('config', 'G-ZZB1HLYXVJ');
-    </script>
+    <script src="/gtag-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

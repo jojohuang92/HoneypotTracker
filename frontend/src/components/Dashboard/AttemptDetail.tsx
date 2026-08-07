@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import type { Attempt } from "../../types";
 import { formatTimestamp, intentLabel, intentColor } from "../../utils/formatters";
 
@@ -41,11 +42,33 @@ export default function AttemptDetail({ attempt: a, onClose }: AttemptDetailProp
             <h4 className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Connection</h4>
             <div className="bg-gray-800/50 rounded-lg p-2">
               <Field label="Time" value={formatTimestamp(a.timestamp)} />
-              <Field label="Source IP" value={a.src_ip} />
+              <Field
+                label="Source IP"
+                value={
+                  <Link
+                    to={`/profile/${encodeURIComponent(a.src_ip)}`}
+                    className="text-cyan-400 hover:text-cyan-300 hover:underline"
+                    title="View attacker profile"
+                  >
+                    {a.src_ip}
+                  </Link>
+                }
+              />
               <Field label="Source Port" value={a.src_port} />
               <Field label="Dest Port" value={a.dst_port} />
               <Field label="Protocol" value={a.protocol} />
-              <Field label="Session" value={a.session_id} />
+              <Field
+                label="Session"
+                value={
+                  <Link
+                    to={`/replay/${encodeURIComponent(a.session_id)}`}
+                    className="text-blue-400 hover:text-blue-300 hover:underline"
+                    title="Replay this session"
+                  >
+                    {a.session_id}
+                  </Link>
+                }
+              />
               <Field label="Event" value={a.event_id} />
             </div>
           </section>

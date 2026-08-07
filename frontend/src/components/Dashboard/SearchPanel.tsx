@@ -1,36 +1,45 @@
 import { useState, useEffect, useRef } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { Search, X } from "lucide-react";
 import { fetchJSON } from "../../utils/api";
 import { formatTimestamp, intentColor, intentLabel } from "../../utils/formatters";
 import type { SearchResult, Attempt } from "../../types";
 import AttemptDetail from "./AttemptDetail";
+import Skeleton from "../common/Skeleton";
+import EmptyState from "../common/EmptyState";
 
-export default function SearchPanel({
-  onNavigateToProfile,
-}: {
-  onNavigateToProfile?: (ip: string) => void;
-}) {
-  const [query, setQuery] = useState("");
+export default function SearchPanel() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlQuery = searchParams.get("q") ?? "";
+  const [query, setQuery] = useState(urlQuery);
   const [results, setResults] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Attempt | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Focus input on mount
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  // Debounced search
+  // Follow external URL changes (e.g. a pivot from another panel)
+  useEffect(() => {
+    setQuery(urlQuery);
+  }, [urlQuery]);
+
+  // Debounced search, synced to the URL so results are shareable
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!query.trim()) {
+    const trimmed = query.trim();
+    if (!trimmed) {
       setResults(null);
       return;
     }
     debounceRef.current = setTimeout(() => {
+      setSearchParams({ q: trimmed }, { replace: true });
       setLoading(true);
-      fetchJSON<SearchResult>(`/search?q=${encodeURIComponent(query.trim())}&limit=100`)
+      fetchJSON<SearchResult>(`/search?q=${encodeURIComponent(trimmed)}&limit=100`)
         .then(setResults)
         .catch(console.error)
         .finally(() => setLoading(false));
@@ -38,34 +47,37 @@ export default function SearchPanel({
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query]);
+  }, [query, setSearchParams]);
+
+  const updateQuery = (value: string) => {
+    setQuery(value);
+    if (!value.trim()) {
+      setResults(null);
+      setSearchParams({}, { replace: true });
+    }
+  };
 
   return (
     <div className="flex flex-col h-full">
       {/* Search bar */}
-      <div className="p-2 border-b border-gray-700">
+      <div className="pb-2 border-b border-gray-700">
         <div className="relative">
-          <svg
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500"
-            fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.35-4.35" />
-          </svg>
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" aria-hidden />
           <input
             ref={inputRef}
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => updateQuery(e.target.value)}
             placeholder="Search IPs, commands, usernames, passwords, countries..."
-            className="w-full pl-8 pr-3 py-2 text-xs bg-gray-800 border border-gray-600 rounded-lg text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+            className="w-full pl-8 pr-8 py-2 text-xs bg-gray-800 border border-gray-600 rounded-lg text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500"
           />
           {query && (
             <button
-              onClick={() => setQuery("")}
+              onClick={() => updateQuery("")}
+              aria-label="Clear search"
               className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
             >
-              ×
+              <X className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
@@ -73,21 +85,22 @@ export default function SearchPanel({
 
       {/* Results */}
       <div className="flex-1 overflow-auto">
-        {loading && (
-          <div className="text-center text-gray-500 py-8 text-xs">Searching...</div>
-        )}
+        {loading && <Skeleton rows={10} className="pt-3" />}
 
         {!loading && !results && (
-          <div className="text-center text-gray-600 py-12 text-xs">
-            <div className="text-2xl mb-2">🔍</div>
-            Type to search across all attack data
-          </div>
+          <EmptyState
+            icon={Search}
+            title="Search across all attack data"
+            hint="IPs, commands, usernames, passwords, and countries are all matched."
+          />
         )}
 
         {!loading && results && results.total === 0 && (
-          <div className="text-center text-gray-500 py-8 text-xs">
-            No results for "{results.query}"
-          </div>
+          <EmptyState
+            icon={Search}
+            title={`No results for "${results.query}"`}
+            hint="Try a shorter fragment — matches are substring-based."
+          />
         )}
 
         {!loading && results && results.total > 0 && (
@@ -116,15 +129,13 @@ export default function SearchPanel({
                       {formatTimestamp(a.timestamp)}
                     </td>
                     <td className="p-2 font-mono whitespace-nowrap">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onNavigateToProfile?.(a.src_ip);
-                        }}
+                      <Link
+                        to={`/profile/${encodeURIComponent(a.src_ip)}`}
+                        onClick={(e) => e.stopPropagation()}
                         className="text-cyan-400 hover:text-cyan-300 hover:underline"
                       >
                         {a.src_ip}
-                      </button>
+                      </Link>
                     </td>
                     <td className="p-2 text-gray-300">
                       {a.event_id.replace("cowrie.", "")}

@@ -1,12 +1,29 @@
+import { useNavigate } from "react-router-dom";
+import { Terminal } from "lucide-react";
 import { useCommandRanks } from "../../hooks/useAttempts";
-import { intentLabel, intentColor } from "../../utils/formatters";
+import { useTimeRange } from "../../context/TimeRangeContext";
+import { intentLabel, intentColor, formatNumber } from "../../utils/formatters";
+import Skeleton from "../common/Skeleton";
+import EmptyState from "../common/EmptyState";
 
 export default function CommandRankings() {
-  const { data, loading } = useCommandRanks();
+  const { range } = useTimeRange();
+  const { data, loading } = useCommandRanks(range.days);
+  const navigate = useNavigate();
 
-  if (loading) return <div className="text-gray-500 text-center py-8">Loading...</div>;
+  if (loading && data.length === 0) return <Skeleton rows={10} />;
 
-  const maxCount = data.length > 0 ? data[0].count : 1;
+  if (data.length === 0) {
+    return (
+      <EmptyState
+        icon={Terminal}
+        title="No commands recorded in this range"
+        hint="Commands appear once attackers get past login and start typing."
+      />
+    );
+  }
+
+  const maxCount = data[0].count;
 
   return (
     <div className="space-y-3">
@@ -14,16 +31,18 @@ export default function CommandRankings() {
 
       <div className="space-y-1.5">
         {data.map((cmd, i) => (
-          <div
+          <button
             key={i}
-            className="bg-gray-800/50 rounded-lg p-2.5 border border-gray-700/50 hover:border-gray-600 transition-colors"
+            onClick={() => navigate(`/search?q=${encodeURIComponent(cmd.command)}`)}
+            title="Find sessions that ran this command"
+            className="w-full text-left bg-gray-800/50 rounded-lg p-2.5 border border-gray-700/50 hover:border-gray-500 transition-colors"
           >
             <div className="flex items-center justify-between mb-1">
               <code className="text-xs text-green-400 font-mono break-all">
                 $ {cmd.command}
               </code>
               <span className="text-xs font-mono text-gray-400 ml-2 shrink-0">
-                {cmd.count}x
+                {formatNumber(cmd.count)}×
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -48,7 +67,7 @@ export default function CommandRankings() {
                 </span>
               )}
             </div>
-          </div>
+          </button>
         ))}
       </div>
     </div>

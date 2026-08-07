@@ -1,10 +1,28 @@
+import { useNavigate } from "react-router-dom";
+import { Globe } from "lucide-react";
 import { useCountryRanks } from "../../hooks/useAttempts";
+import { useTimeRange } from "../../context/TimeRangeContext";
+import { formatNumber } from "../../utils/formatters";
 import CountryBarChart from "../Charts/BarChart";
+import Skeleton from "../common/Skeleton";
+import EmptyState from "../common/EmptyState";
 
 export default function CountryRankings() {
-  const { data, loading } = useCountryRanks();
+  const { range } = useTimeRange();
+  const { data, loading } = useCountryRanks(range.days);
+  const navigate = useNavigate();
 
-  if (loading) return <div className="text-gray-500 text-center py-8">Loading...</div>;
+  if (loading && data.length === 0) return <Skeleton rows={10} />;
+
+  if (data.length === 0) {
+    return (
+      <EmptyState
+        icon={Globe}
+        title="No geolocated attacks in this range"
+        hint="Widen the time range, or check that the GeoIP database is configured."
+      />
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -29,14 +47,19 @@ export default function CountryRankings() {
           </thead>
           <tbody>
             {data.map((c, i) => (
-              <tr key={c.country_code} className="border-b border-gray-800 hover:bg-gray-700/30">
+              <tr
+                key={c.country_code}
+                onClick={() => navigate(`/attempts?country=${encodeURIComponent(c.country_code)}`)}
+                title={`View attempts from ${c.country_name}`}
+                className="border-b border-gray-800 hover:bg-gray-700/30 cursor-pointer"
+              >
                 <td className="p-2 text-gray-500">{i + 1}</td>
                 <td className="p-2">
                   <span className="text-white font-medium">{c.country_name}</span>
                   <span className="ml-1 text-gray-500">({c.country_code})</span>
                 </td>
                 <td className="p-2 text-right font-mono text-orange-400">
-                  {c.count.toLocaleString()}
+                  {formatNumber(c.count)}
                 </td>
                 <td className="p-2 text-right text-gray-400">{c.percentage}%</td>
               </tr>

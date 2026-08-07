@@ -1,5 +1,6 @@
 """MaxMind GeoLite2 lookup wrapper with graceful fallback."""
 
+import ipaddress
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,8 +20,10 @@ class GeoResult:
     country_code: str = ""
     country_name: str = ""
     city: str = ""
-    latitude: float = 0.0
-    longitude: float = 0.0
+    # None (not 0.0) when unknown — 0.0/0.0 is a real place ("Null Island")
+    # and would render as a phantom map pin in the Atlantic.
+    latitude: float | None = None
+    longitude: float | None = None
     asn: int | None = None
     as_org: str = ""
 
@@ -47,8 +50,11 @@ class GeoIPLookup:
         if not self._reader:
             return GeoResult()
 
-        # Skip private/reserved IPs
-        if ip.startswith(("10.", "172.16.", "192.168.", "127.", "0.")):
+        # Skip private/reserved/non-routable IPs
+        try:
+            if not ipaddress.ip_address(ip).is_global:
+                return GeoResult()
+        except ValueError:
             return GeoResult()
 
         try:
@@ -71,8 +77,8 @@ class GeoIPLookup:
                 country_code=country.get("iso_code", ""),
                 country_name=country.get("names", {}).get("en", ""),
                 city=city,
-                latitude=location.get("latitude", 0.0),
-                longitude=location.get("longitude", 0.0),
+                latitude=location.get("latitude"),
+                longitude=location.get("longitude"),
                 asn=traits.get("autonomous_system_number"),
                 as_org=traits.get("autonomous_system_organization", ""),
             )

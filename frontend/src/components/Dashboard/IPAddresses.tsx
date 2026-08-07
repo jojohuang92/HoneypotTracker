@@ -1,8 +1,12 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
+import { Network } from "lucide-react";
 import { useUniqueIPs } from "../../hooks/useAttempts";
 import { formatTimestamp } from "../../utils/formatters";
 import { fetchJSON } from "../../utils/api";
 import type { UniqueIP } from "../../types";
+import Skeleton from "../common/Skeleton";
+import EmptyState from "../common/EmptyState";
 
 function scoreColor(score: number | null): string {
   if (score === null) return "text-gray-500";
@@ -71,7 +75,17 @@ export default function IPAddresses() {
     }
   };
 
-  if (loading) return <div className="text-gray-500 text-center py-8">Loading...</div>;
+  if (loading && data.length === 0) return <Skeleton rows={12} />;
+
+  if (data.length === 0) {
+    return (
+      <EmptyState
+        icon={Network}
+        title="No attacker IPs recorded yet"
+        hint="IPs appear as soon as the honeypot sees its first connection."
+      />
+    );
+  }
 
   const filtered = data
     .filter((d) => matchesScoreFilter(d.abuse_score, scoreFilter))
@@ -130,8 +144,14 @@ export default function IPAddresses() {
           <tbody>
             {filtered.map((ip) => (
               <tr key={ip.src_ip} className={`border-b border-gray-800/50 hover:bg-gray-700/30 ${scoreBg(ip.abuse_score)}`}>
-                <td className="p-2 font-mono text-cyan-400 whitespace-nowrap">
-                  {ip.src_ip}
+                <td className="p-2 font-mono whitespace-nowrap">
+                  <Link
+                    to={`/profile/${encodeURIComponent(ip.src_ip)}`}
+                    className="text-cyan-400 hover:text-cyan-300 hover:underline"
+                    title="View attacker profile"
+                  >
+                    {ip.src_ip}
+                  </Link>
                 </td>
                 <td className="p-2 text-gray-300 max-w-[120px]">
                   <div className="truncate">

@@ -1,17 +1,27 @@
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session as DBSession
-from sqlalchemy import func, desc, distinct, case
-from datetime import datetime, timedelta, timezone
+from sqlalchemy import func, desc, distinct
+from datetime import datetime, timedelta
 
 from app.database import get_db
+from app.mitre import TACTIC_NAME_BY_ID, TACTICS, tactic_for, technique_name_for
 from app.models import Attempt
 from app.rate_limit import limiter
 from app.schemas import (
     OverviewStats, CountryRank, IntentBreakdown,
     CommandRank, CredentialPair, TimelineBucket,
+    MitreMatrix, MitreTactic, MitreTechnique,
 )
+from app.time_utils import local_midnight_utc_naive
 
 router = APIRouter()
+
+# Shared "days" query param: 0 = all time, otherwise a trailing window.
+DaysQuery = Query(0, ge=0, le=365, description="Restrict to the last N days (0 = all time)")
+
+
+def _since(days: float) -> datetime | None:
+    return datetime.utcnow() - timedelta(days=days) if days > 0 else None
 
 INTENT_DESCRIPTIONS = {
     "brute_force": "Repeated login attempts to guess credentials",
@@ -42,31 +52,43 @@ INTENT_MITRE = {
 
 @router.get("/overview", response_model=OverviewStats)
 @limiter.limit("60/minute")
-def overview(request: Request, db: DBSession = Depends(get_db)):
-    # "Today" resets at midnight PST (UTC-8)
-    pst = timezone(timedelta(hours=-8))
-    today_pst = datetime.now(pst).replace(hour=0, minute=0, second=0, microsecond=0)
-    today = today_pst.astimezone(timezone.utc).replace(tzinfo=None)
+def overview(request: Request, days: float = DaysQuery, db: DBSession = Depends(get_db)):
+    today = local_midnight_utc_naive()
+    since = _since(days)
 
-    total = db.query(func.count(Attempt.id)).scalar() or 0
-    unique_ips = db.query(func.count(distinct(Attempt.src_ip))).scalar() or 0
-    unique_countries = (
+    total_q = db.query(func.count(Attempt.id))
+    ips_q = db.query(func.count(distinct(Attempt.src_ip)))
+    countries_q = (
         db.query(func.count(distinct(Attempt.country_code)))
         .filter(Attempt.country_code.isnot(None))
-        .scalar() or 0
     )
+    if since:
+        total_q = total_q.filter(Attempt.timestamp >= since)
+        ips_q = ips_q.filter(Attempt.timestamp >= since)
+        countries_q = countries_q.filter(Attempt.timestamp >= since)
+
     attacks_today = (
         db.query(func.count(Attempt.id))
         .filter(Attempt.timestamp >= today)
         .scalar() or 0
     )
 
+    prev_attempts = None
+    if since:
+        prev_since = since - timedelta(days=days)
+        prev_attempts = (
+            db.query(func.count(Attempt.id))
+            .filter(Attempt.timestamp >= prev_since, Attempt.timestamp < since)
+            .scalar() or 0
+        )
+
     return OverviewStats(
-        total_attempts=total,
-        unique_ips=unique_ips,
-        unique_countries=unique_countries,
+        total_attempts=total_q.scalar() or 0,
+        unique_ips=ips_q.scalar() or 0,
+        unique_countries=countries_q.scalar() or 0,
         attacks_today=attacks_today,
         active_sessions=0,
+        prev_attempts=prev_attempts,
     )
 
 
@@ -75,17 +97,26 @@ def overview(request: Request, db: DBSession = Depends(get_db)):
 def country_rankings(
     request: Request,
     limit: int = Query(20, ge=1, le=100),
+    days: float = DaysQuery,
     db: DBSession = Depends(get_db),
 ):
-    total = db.query(func.count(Attempt.id)).scalar() or 1
-
-    rows = (
+    since = _since(days)
+    total_q = db.query(func.count(Attempt.id))
+    rows_q = (
         db.query(
             Attempt.country_code,
             Attempt.country_name,
             func.count(Attempt.id).label("count"),
         )
         .filter(Attempt.country_code.isnot(None))
+    )
+    if since:
+        total_q = total_q.filter(Attempt.timestamp >= since)
+        rows_q = rows_q.filter(Attempt.timestamp >= since)
+
+    total = total_q.scalar() or 1
+    rows = (
+        rows_q
         .group_by(Attempt.country_code, Attempt.country_name)
         .order_by(desc("count"))
         .limit(limit)
@@ -105,16 +136,18 @@ def country_rankings(
 
 @router.get("/intents", response_model=list[IntentBreakdown])
 @limiter.limit("60/minute")
-def intent_breakdown(request: Request, db: DBSession = Depends(get_db)):
-    total = db.query(func.count(Attempt.id)).scalar() or 1
-
-    rows = (
-        db.query(Attempt.intent, func.count(Attempt.id).label("count"))
-        .filter(Attempt.intent.isnot(None))
-        .group_by(Attempt.intent)
-        .order_by(desc("count"))
-        .all()
+def intent_breakdown(request: Request, days: float = DaysQuery, db: DBSession = Depends(get_db)):
+    since = _since(days)
+    total_q = db.query(func.count(Attempt.id))
+    rows_q = db.query(Attempt.intent, func.count(Attempt.id).label("count")).filter(
+        Attempt.intent.isnot(None)
     )
+    if since:
+        total_q = total_q.filter(Attempt.timestamp >= since)
+        rows_q = rows_q.filter(Attempt.timestamp >= since)
+
+    total = total_q.scalar() or 1
+    rows = rows_q.group_by(Attempt.intent).order_by(desc("count")).all()
 
     return [
         IntentBreakdown(
@@ -133,15 +166,20 @@ def intent_breakdown(request: Request, db: DBSession = Depends(get_db)):
 def top_commands(
     request: Request,
     limit: int = Query(20, ge=1, le=100),
+    days: float = DaysQuery,
     db: DBSession = Depends(get_db),
 ):
+    since = _since(days)
+    rows_q = db.query(
+        Attempt.command,
+        func.count(Attempt.id).label("count"),
+        Attempt.intent,
+    ).filter(Attempt.command.isnot(None), Attempt.command != "")
+    if since:
+        rows_q = rows_q.filter(Attempt.timestamp >= since)
+
     rows = (
-        db.query(
-            Attempt.command,
-            func.count(Attempt.id).label("count"),
-            Attempt.intent,
-        )
-        .filter(Attempt.command.isnot(None), Attempt.command != "")
+        rows_q
         .group_by(Attempt.command)
         .order_by(desc("count"))
         .limit(limit)
@@ -159,15 +197,20 @@ def top_commands(
 def top_credentials(
     request: Request,
     limit: int = Query(20, ge=1, le=100),
+    days: float = DaysQuery,
     db: DBSession = Depends(get_db),
 ):
+    since = _since(days)
+    rows_q = db.query(
+        Attempt.username,
+        Attempt.password,
+        func.count(Attempt.id).label("count"),
+    ).filter(Attempt.username.isnot(None))
+    if since:
+        rows_q = rows_q.filter(Attempt.timestamp >= since)
+
     rows = (
-        db.query(
-            Attempt.username,
-            Attempt.password,
-            func.count(Attempt.id).label("count"),
-        )
-        .filter(Attempt.username.isnot(None))
+        rows_q
         .group_by(Attempt.username, Attempt.password)
         .order_by(desc("count"))
         .limit(limit)
@@ -189,14 +232,19 @@ def top_credentials(
 def top_ports(
     request: Request,
     limit: int = Query(10, ge=1, le=50),
+    days: float = DaysQuery,
     db: DBSession = Depends(get_db),
 ):
+    since = _since(days)
+    rows_q = db.query(
+        Attempt.dst_port,
+        func.count(Attempt.id).label("count"),
+    ).filter(Attempt.dst_port.isnot(None))
+    if since:
+        rows_q = rows_q.filter(Attempt.timestamp >= since)
+
     rows = (
-        db.query(
-            Attempt.dst_port,
-            func.count(Attempt.id).label("count"),
-        )
-        .filter(Attempt.dst_port.isnot(None))
+        rows_q
         .group_by(Attempt.dst_port)
         .order_by(desc("count"))
         .limit(limit)
@@ -207,6 +255,54 @@ def top_ports(
         {"port": r.dst_port, "count": r.count, "percentage": round(r.count / total * 100, 1)}
         for r in rows
     ]
+
+
+@router.get("/mitre", response_model=MitreMatrix)
+@limiter.limit("60/minute")
+def mitre_matrix(request: Request, days: float = DaysQuery, db: DBSession = Depends(get_db)):
+    """Return observed MITRE ATT&CK techniques grouped by tactic, with counts."""
+    since = _since(days)
+    rows_q = db.query(Attempt.mitre_id, func.count(Attempt.id).label("count")).filter(
+        Attempt.mitre_id.isnot(None)
+    )
+    if since:
+        rows_q = rows_q.filter(Attempt.timestamp >= since)
+
+    rows = rows_q.group_by(Attempt.mitre_id).order_by(desc("count")).all()
+
+    by_tactic: dict[str, list[MitreTechnique]] = {}
+    totals: dict[str, int] = {}
+    grand_total = 0
+
+    for r in rows:
+        tactic_id = tactic_for(r.mitre_id)
+        if not tactic_id:
+            continue  # drop unknown technique IDs rather than inventing a tactic
+        technique = MitreTechnique(
+            mitre_id=r.mitre_id,
+            technique_name=technique_name_for(r.mitre_id),
+            tactic_id=tactic_id,
+            tactic_name=TACTIC_NAME_BY_ID[tactic_id],
+            count=r.count,
+        )
+        by_tactic.setdefault(tactic_id, []).append(technique)
+        totals[tactic_id] = totals.get(tactic_id, 0) + r.count
+        grand_total += r.count
+
+    tactics = []
+    # Preserve MITRE Navigator column order
+    for tactic_id, tactic_name in TACTICS:
+        if tactic_id not in by_tactic:
+            continue
+        techniques = sorted(by_tactic[tactic_id], key=lambda t: -t.count)
+        tactics.append(MitreTactic(
+            tactic_id=tactic_id,
+            tactic_name=tactic_name,
+            total=totals[tactic_id],
+            techniques=techniques,
+        ))
+
+    return MitreMatrix(tactics=tactics, grand_total=grand_total)
 
 
 @router.get("/timeline", response_model=list[TimelineBucket])

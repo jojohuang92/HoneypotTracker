@@ -34,12 +34,33 @@ export interface GeoPin {
   latest_src_ip: string | null;
 }
 
+export interface LiveAttackEvent {
+  type: "session_start" | "login_attempt" | "command" | "file_download" | string;
+  event_id?: string;
+  session_id?: string;
+  src_ip?: string;
+  username?: string;
+  password?: string;
+  success?: boolean;
+  command?: string;
+  intent?: string | null;
+  mitre_id?: string | null;
+  country?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  url?: string;
+  sha256?: string;
+  protocol?: string;
+}
+
 export interface OverviewStats {
   total_attempts: number;
   unique_ips: number;
   unique_countries: number;
   attacks_today: number;
   active_sessions: number;
+  /** Attempts in the equal-length window before the requested one (null when all-time). */
+  prev_attempts?: number | null;
 }
 
 export interface CountryRank {
@@ -148,14 +169,23 @@ export interface SearchResult {
   query: string;
 }
 
-export type DashboardTab =
-  | "overview"
-  | "attempts"
-  | "search"
-  | "profile"
-  | "ips"
-  | "countries"
-  | "intents"
-  | "commands"
-  | "files"
-  | "malware";
+export interface MitreTechnique {
+  mitre_id: string;
+  technique_name: string;
+  tactic_id: string;
+  tactic_name: string;
+  count: number;
+}
+
+export interface MitreTactic {
+  tactic_id: string;
+  tactic_name: string;
+  total: number;
+  techniques: MitreTechnique[];
+}
+
+export interface MitreMatrix {
+  tactics: MitreTactic[];
+  grand_total: number;
+}
+

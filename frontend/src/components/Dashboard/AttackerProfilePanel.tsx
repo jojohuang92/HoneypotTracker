@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { UserSearch } from "lucide-react";
 import { fetchJSON } from "../../utils/api";
 import { formatTimestamp, intentColor, intentLabel } from "../../utils/formatters";
-import type { AttackerProfile, Attempt } from "../../types";
-import SessionReplayPanel from "./SessionReplayPanel";
+import type { AttackerProfile } from "../../types";
+import Skeleton from "../common/Skeleton";
+import EmptyState from "../common/EmptyState";
 
 function StatBox({ label, value, color = "text-white" }: { label: string; value: string | number; color?: string }) {
   return (
@@ -13,49 +16,49 @@ function StatBox({ label, value, color = "text-white" }: { label: string; value:
   );
 }
 
-export default function AttackerProfilePanel({ initialIp }: { initialIp?: string }) {
-  const [ip, setIp] = useState(initialIp || "");
-  const [inputValue, setInputValue] = useState(initialIp || "");
+/** The profiled IP lives in the URL (/profile/:ip) so profiles are
+ *  shareable and every IP shown elsewhere can link straight here.
+ *  The route keys this component by IP, so state resets per profile. */
+export default function AttackerProfilePanel() {
+  const { ip } = useParams<{ ip: string }>();
+  const navigate = useNavigate();
+  const [inputValue, setInputValue] = useState(ip ?? "");
   const [profile, setProfile] = useState<AttackerProfile | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(Boolean(ip));
   const [error, setError] = useState("");
-  const [replaySession, setReplaySession] = useState<string | null>(null);
 
-  const lookup = (targetIp?: string) => {
-    const lookupIp = targetIp || inputValue.trim();
+  const lookup = () => {
+    const lookupIp = inputValue.trim();
     if (!lookupIp) return;
-    setIp(lookupIp);
-    setInputValue(lookupIp);
-    setError("");
-    setLoading(true);
-    setReplaySession(null);
-    fetchJSON<AttackerProfile>(`/profile/${encodeURIComponent(lookupIp)}`)
-      .then(setProfile)
-      .catch(() => {
-        setProfile(null);
-        setError("IP not found");
-      })
-      .finally(() => setLoading(false));
+    navigate(`/profile/${encodeURIComponent(lookupIp)}`);
   };
 
-  // If initialIp changed externally, trigger lookup
-  if (initialIp && initialIp !== ip) {
-    lookup(initialIp);
-  }
-
-  if (replaySession) {
-    return (
-      <SessionReplayPanel
-        sessionId={replaySession}
-        onBack={() => setReplaySession(null)}
-      />
-    );
-  }
+  useEffect(() => {
+    if (!ip) return;
+    let cancelled = false;
+    fetchJSON<AttackerProfile>(`/profile/${encodeURIComponent(ip)}`)
+      .then((nextProfile) => {
+        if (cancelled) return;
+        setProfile(nextProfile);
+        setError("");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setProfile(null);
+        setError(`No activity recorded for ${ip}`);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ip]);
 
   return (
     <div className="flex flex-col h-full">
       {/* Search bar */}
-      <div className="p-2 border-b border-gray-700">
+      <div className="pb-2 border-b border-gray-700">
         <form
           onSubmit={(e) => { e.preventDefault(); lookup(); }}
           className="flex gap-2"
@@ -80,19 +83,18 @@ export default function AttackerProfilePanel({ initialIp }: { initialIp?: string
       {/* Content */}
       <div className="flex-1 overflow-auto p-3 space-y-4">
         {!profile && !loading && !error && (
-          <div className="text-center text-gray-600 py-12 text-xs">
-            <div className="text-2xl mb-2">👤</div>
-            Enter an IP to view its attacker profile
-          </div>
+          <EmptyState
+            icon={UserSearch}
+            title="Profile an attacker IP"
+            hint="Enter an IP above, or click any IP anywhere in the dashboard."
+          />
         )}
 
-        {error && (
-          <div className="text-center text-red-400 py-8 text-xs">{error}</div>
+        {error && !loading && (
+          <EmptyState icon={UserSearch} title={error} hint="The IP may not have reached this honeypot." />
         )}
 
-        {loading && (
-          <div className="text-center text-gray-500 py-8 text-xs">Loading profile...</div>
-        )}
+        {loading && <Skeleton rows={8} />}
 
         {profile && !loading && (
           <>
@@ -244,7 +246,7 @@ export default function AttackerProfilePanel({ initialIp }: { initialIp?: string
                   {profile.sessions.map((s) => (
                     <button
                       key={s.session_id}
-                      onClick={() => setReplaySession(s.session_id)}
+                      onClick={() => navigate(`/replay/${encodeURIComponent(s.session_id)}`)}
                       className="w-full flex items-center justify-between px-2 py-1.5 border-b border-gray-800/50 last:border-0 hover:bg-gray-700/30 text-left transition-colors"
                     >
                       <div>

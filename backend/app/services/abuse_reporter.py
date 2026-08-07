@@ -5,7 +5,6 @@ import logging
 from datetime import datetime, timedelta
 
 import httpx
-from sqlalchemy import func
 
 from app.config import settings
 from app.database import SessionLocal
@@ -47,6 +46,28 @@ def _was_recently_reported(db, ip: str) -> bool:
             ReportLog.report_type == "abuseipdb",
             ReportLog.identifier == ip,
             ReportLog.reported_at > cutoff,
+            ReportLog.success == True,
+        )
+        .first()
+        is not None
+    )
+
+
+def _session_already_covered(db, ip: str, session_end: datetime | None) -> bool:
+    """Check if a successful report for this IP already covers the session.
+
+    A report sent at or after the session's end time includes all of that
+    session's activity, so the session must never be reported again — only
+    *new* sessions from the same IP warrant a new report.
+    """
+    if session_end is None:
+        return False
+    return (
+        db.query(ReportLog)
+        .filter(
+            ReportLog.report_type == "abuseipdb",
+            ReportLog.identifier == ip,
+            ReportLog.reported_at >= session_end,
             ReportLog.success == True,
         )
         .first()
@@ -154,7 +175,7 @@ async def auto_report_ips():
                     .all()
                 )
 
-                to_report: list[tuple[str, str]] = []  # (ip, session_id)
+                to_report: list[tuple[str, str, datetime | None]] = []  # (ip, session_id, end_time)
                 seen_ips: set[str] = set()
 
                 for sess in closed_sessions:
@@ -162,20 +183,30 @@ async def auto_report_ips():
                     if ip in seen_ips:
                         continue
                     seen_ips.add(ip)
-                    if not _was_recently_reported(db, ip):
-                        to_report.append((ip, sess.session_id))
+                    if _was_recently_reported(db, ip):
+                        continue
+                    if _session_already_covered(db, ip, sess.end_time):
+                        continue
+                    to_report.append((ip, sess.session_id, sess.end_time))
             finally:
                 db.close()
 
-            for ip, session_id in to_report:
+            for ip, session_id, session_end in to_report:
                 db = SessionLocal()
                 try:
                     # Re-check dedup inside the loop (another iteration may have reported it)
-                    if _was_recently_reported(db, ip):
+                    if _was_recently_reported(db, ip) or _session_already_covered(
+                        db, ip, session_end
+                    ):
                         continue
 
                     comment, categories = _build_report_comment(db, ip, session_id)
-                    success = _report_ip(ip, categories, comment)
+                    success = await asyncio.to_thread(
+                        _report_ip,
+                        ip,
+                        categories,
+                        comment,
+                    )
 
                     log_entry = ReportLog(
                         report_type="abuseipdb",

@@ -1,12 +1,14 @@
 """VirusTotal file report lookup."""
 
 import logging
+from datetime import datetime
 
 import httpx
 
 from app.config import settings
 from app.database import SessionLocal
 from app.models import CapturedFile
+from app.services.alerts import alert_vt_result
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,7 @@ async def enrich_captured_file(file_id: int) -> None:
         captured.vt_positives = stats.get("malicious", 0)
         captured.vt_total = total
         captured.vt_link = f"https://www.virustotal.com/gui/file/{captured.sha256}"
+        captured.analyzed_at = datetime.utcnow()
 
         if not captured.file_size:
             captured.file_size = attrs.get("size")
@@ -53,6 +56,9 @@ async def enrich_captured_file(file_id: int) -> None:
         db.commit()
         logger.info(
             f"VT: {captured.sha256[:16]}... → {captured.vt_positives}/{total} detections"
+        )
+        await alert_vt_result(
+            captured.sha256, captured.vt_positives, total, captured.filename
         )
     except Exception as e:
         logger.error(f"VT enrichment failed for file {file_id}: {e}")

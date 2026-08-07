@@ -10,7 +10,7 @@ import ipaddress
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy.orm import Session as DBSession
@@ -19,6 +19,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import Attempt, CapturedFile, Session
 from app.routers.stream import publish_event
+from app.services import alerts, splunk_forwarder
 from app.services.classifier import classify_command, classify_login
 from app.services.geoip import GeoIPLookup
 from app.services.virustotal import enrich_captured_file
@@ -49,8 +50,10 @@ def _parse_timestamp(ts_str: str) -> datetime:
     ts_str = ts_str.replace("Z", "+00:00").replace("+0000", "+00:00")
     try:
         dt = datetime.fromisoformat(ts_str)
-        # Strip timezone info — SQLite stores naive datetimes, mixing causes errors
-        return dt.replace(tzinfo=None)
+        # Store UTC as naive datetimes because the existing SQLite schema is naive.
+        if dt.tzinfo is not None:
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
     except ValueError:
         return datetime.utcnow()
 
@@ -85,10 +88,41 @@ def _build_attempt(
 
 
 def _increment_session_field(db: DBSession, session_id: str, field: str) -> None:
-    """Atomically increment a counter field on the Session row."""
+    """Increment a counter field on the Session row (ingestion is the only writer)."""
     sess = db.query(Session).filter_by(session_id=session_id).first()
     if sess:
         setattr(sess, field, (getattr(sess, field) or 0) + 1)
+
+
+def _attempt_base_query(
+    db: DBSession,
+    event_id: str,
+    session_id: str,
+    src_ip: str,
+    timestamp: datetime,
+):
+    """Build the common duplicate-detection query for a Cowrie event."""
+    return db.query(Attempt).filter(
+        Attempt.event_id == event_id,
+        Attempt.session_id == session_id,
+        Attempt.src_ip == src_ip,
+        Attempt.timestamp == timestamp,
+    )
+
+
+def _attempt_exists(
+    db: DBSession,
+    event_id: str,
+    session_id: str,
+    src_ip: str,
+    timestamp: datetime,
+    **fields,
+) -> bool:
+    query = _attempt_base_query(db, event_id, session_id, src_ip, timestamp)
+    for name, value in fields.items():
+        column = getattr(Attempt, name)
+        query = query.filter(column.is_(None) if value is None else column == value)
+    return query.first() is not None
 
 
 def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]:
@@ -105,11 +139,14 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
         logger.debug(f"Skipping private IP: {src_ip}")
         return None, None
 
-    geoip = get_geoip()
-    geo = geoip.lookup(src_ip)
-
     # --- Session connect ---
     if event_id == "cowrie.session.connect":
+        existing = db.query(Session).filter_by(session_id=session_id).first()
+        if existing:
+            return None, None
+
+        geoip = get_geoip()
+        geo = geoip.lookup(src_ip)
         protocol = event.get("protocol", "ssh")
         session_obj = Session(
             session_id=session_id,
@@ -121,10 +158,11 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
             latitude=geo.latitude,
             longitude=geo.longitude,
         )
-        db.merge(session_obj)
+        db.add(session_obj)
         db.commit()
         return {
             "type": "session_start",
+            "event_id": event_id,
             "session_id": session_id,
             "src_ip": src_ip,
             "country": geo.country_name,
@@ -134,12 +172,27 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
     # --- Login attempt ---
     elif event_id in ("cowrie.login.failed", "cowrie.login.success"):
         success = event_id == "cowrie.login.success"
+        username = event.get("username", "")
+        password = event.get("password", "")
+        if _attempt_exists(
+            db,
+            event_id,
+            session_id,
+            src_ip,
+            timestamp,
+            username=username,
+            password=password,
+        ):
+            return None, None
+
+        geoip = get_geoip()
+        geo = geoip.lookup(src_ip)
         intent, mitre_id = classify_login(success)
 
         db.add(_build_attempt(
             event, event_id, session_id, src_ip, timestamp, geo,
-            username=event.get("username", ""),
-            password=event.get("password", ""),
+            username=username,
+            password=password,
             success=success,
             intent=intent,
             mitre_id=mitre_id,
@@ -148,10 +201,11 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
         db.commit()
         return {
             "type": "login_attempt",
+            "event_id": event_id,
             "session_id": session_id,
             "src_ip": src_ip,
-            "username": event.get("username", ""),
-            "password": event.get("password", ""),
+            "username": username,
+            "password": password,
             "success": success,
             "country": geo.country_name,
             "latitude": geo.latitude,
@@ -161,6 +215,18 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
     # --- Command input ---
     elif event_id == "cowrie.command.input":
         command = event.get("input", "")
+        if _attempt_exists(
+            db,
+            event_id,
+            session_id,
+            src_ip,
+            timestamp,
+            command=command,
+        ):
+            return None, None
+
+        geoip = get_geoip()
+        geo = geoip.lookup(src_ip)
         intent, mitre_id = classify_command(command)
 
         db.add(_build_attempt(
@@ -173,6 +239,7 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
         db.commit()
         return {
             "type": "command",
+            "event_id": event_id,
             "session_id": session_id,
             "src_ip": src_ip,
             "command": command,
@@ -188,10 +255,24 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
         url = event.get("url", event.get("destfile", ""))
         sha256 = event.get("shasum", "")
         filename = event.get("outfile", event.get("filename", ""))
+        command = f"download: {url}" if url else f"upload: {filename}"
+
+        if _attempt_exists(
+            db,
+            event_id,
+            session_id,
+            src_ip,
+            timestamp,
+            command=command,
+        ):
+            return None, None
+
+        geoip = get_geoip()
+        geo = geoip.lookup(src_ip)
 
         attempt = _build_attempt(
             event, event_id, session_id, src_ip, timestamp, geo,
-            command=f"download: {url}" if url else f"upload: {filename}",
+            command=command,
             intent="malware_deployment",
             mitre_id="T1105",
         )
@@ -217,6 +298,7 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
         db.commit()
         return {
             "type": "file_download",
+            "event_id": event_id,
             "session_id": session_id,
             "src_ip": src_ip,
             "url": url,
@@ -236,6 +318,31 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
         return None, None
 
     return None, None
+
+
+# Strong references to in-flight fire-and-forget tasks. The event loop only
+# keeps weak references, so without this a pending Splunk send or VT
+# enrichment can be garbage-collected before it runs.
+_pending_tasks: set[asyncio.Task] = set()
+
+
+def _dispatch(sse_payload: dict | None, captured_id: int | None) -> list[asyncio.Task]:
+    """Fan out a processed event: SSE publish + Splunk forward + VT enrichment.
+
+    Splunk send and VT enrichment are fire-and-forget tasks so a slow or
+    offline downstream never stalls ingestion.
+    """
+    tasks: list[asyncio.Task] = []
+    if sse_payload:
+        publish_event("new_attack", sse_payload)
+        tasks.append(asyncio.create_task(splunk_forwarder.send(sse_payload)))
+        tasks.append(asyncio.create_task(alerts.alert_for_event(sse_payload)))
+    if captured_id:
+        tasks.append(asyncio.create_task(enrich_captured_file(captured_id)))
+    for task in tasks:
+        _pending_tasks.add(task)
+        task.add_done_callback(_pending_tasks.discard)
+    return tasks
 
 
 async def tail_cowrie_log(log_path: str):
@@ -285,10 +392,7 @@ async def tail_cowrie_log(log_path: str):
                             continue
 
                         sse_payload, captured_id = _process_event(event, db)
-                        if sse_payload:
-                            publish_event("new_attack", sse_payload)
-                        if captured_id:
-                            asyncio.create_task(enrich_captured_file(captured_id))
+                        _dispatch(sse_payload, captured_id)
                 finally:
                     db.close()
 

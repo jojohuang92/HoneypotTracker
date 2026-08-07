@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Query, Request
+import ipaddress
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import func, desc
 
@@ -6,7 +8,7 @@ from app.database import get_db
 from app.models import Attempt, IPScore
 from app.rate_limit import limiter
 from app.schemas import UniqueIP
-from app.services.abuseipdb import get_cached_score, fetch_and_cache_score
+from app.services.abuseipdb import RateLimitedError, fetch_and_cache_score
 
 router = APIRouter()
 
@@ -15,11 +17,14 @@ router = APIRouter()
 @limiter.limit("60/minute")
 def list_unique_ips(
     request: Request,
-    limit: int = Query(50, ge=1, le=200),
+    limit: int | None = Query(None, ge=1),
     db: DBSession = Depends(get_db),
 ):
-    """Return unique IPs ranked by attack count, with cached AbuseIPDB scores."""
-    rows = (
+    """Return unique IPs ranked by attack count, with cached AbuseIPDB scores.
+
+    When ``limit`` is omitted, returns every distinct source IP.
+    """
+    query = (
         db.query(
             Attempt.src_ip,
             func.count(Attempt.id).label("count"),
@@ -30,9 +35,10 @@ def list_unique_ips(
         )
         .group_by(Attempt.src_ip)
         .order_by(desc("count"))
-        .limit(limit)
-        .all()
     )
+    if limit is not None:
+        query = query.limit(limit)
+    rows = query.all()
 
     # Batch-load cached scores
     ips = [r.src_ip for r in rows]
@@ -64,7 +70,20 @@ def list_unique_ips(
 @limiter.limit("10/minute")
 def lookup_ip_score(request: Request, ip: str, db: DBSession = Depends(get_db)):
     """Fetch (or refresh) the AbuseIPDB score for a single IP."""
-    score_row = fetch_and_cache_score(db, ip)
+    # Validate before spending AbuseIPDB quota or caching junk identifiers
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid IP address")
+    if not addr.is_global:
+        raise HTTPException(status_code=400, detail="IP address is not publicly routable")
+
+    try:
+        score_row = fetch_and_cache_score(db, ip)
+    except RateLimitedError:
+        raise HTTPException(
+            status_code=429, detail="AbuseIPDB quota exhausted — try again later"
+        )
 
     # Get attack stats for this IP
     stats = (

@@ -4,9 +4,19 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          leaflet: ['leaflet', 'react-leaflet', 'react-leaflet-cluster'],
+          charts: ['recharts'],
+        },
+      },
+    },
+  },
   server: {
     proxy: {
-      '/api': 'http://localhost:5000',
+      '/api': 'http://localhost:8000',
     },
   },
 })

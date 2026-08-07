@@ -2,7 +2,7 @@ import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap } from "react-l
 import MarkerClusterGroup from "react-leaflet-cluster";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import type { GeoPin, Attempt } from "../../types";
+import type { GeoPin, LiveAttackEvent } from "../../types";
 import { formatTimestamp } from "../../utils/formatters";
 import { useEffect } from "react";
 
@@ -47,25 +47,30 @@ function createPinIcon(count: number) {
 }
 
 interface NewAttackAnimatorProps {
-  lastEvent: Attempt | null;
+  lastEvent: LiveAttackEvent | null;
 }
 
 function NewAttackAnimator({ lastEvent }: NewAttackAnimatorProps) {
   const map = useMap();
 
   useEffect(() => {
-    if (lastEvent?.latitude && lastEvent?.longitude) {
-      const circle = L.circleMarker([lastEvent.latitude, lastEvent.longitude], {
-        radius: 20,
-        color: "#ef4444",
-        fillColor: "#ef4444",
-        fillOpacity: 0.4,
-        weight: 2,
-        className: "attack-pulse",
-      }).addTo(map);
+    if (lastEvent?.latitude == null || lastEvent?.longitude == null) return;
 
-      setTimeout(() => map.removeLayer(circle), 2000);
-    }
+    const src: [number, number] = [lastEvent.latitude, lastEvent.longitude];
+
+    const pulse = L.circleMarker(src, {
+      radius: 20,
+      color: "#ef4444",
+      fillColor: "#ef4444",
+      fillOpacity: 0.4,
+      weight: 2,
+      className: "attack-pulse",
+    }).addTo(map);
+    setTimeout(() => map.removeLayer(pulse), 2000);
+
+    return () => {
+      map.removeLayer(pulse);
+    };
   }, [lastEvent, map]);
 
   return null;
@@ -82,7 +87,7 @@ function MapResizer({ width }: { width: number }) {
 interface AttackMapProps {
   pins: GeoPin[];
   onPinClick?: (pin: GeoPin) => void;
-  lastEvent?: Attempt | null;
+  lastEvent?: LiveAttackEvent | null;
   containerWidth?: number;
 }
 

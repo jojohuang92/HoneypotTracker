@@ -1,11 +1,28 @@
+import { useNavigate } from "react-router-dom";
+import { Crosshair } from "lucide-react";
 import { useIntentBreakdown } from "../../hooks/useAttempts";
+import { useTimeRange } from "../../context/TimeRangeContext";
 import IntentPieChart from "../Charts/PieChart";
-import { intentLabel, intentColor } from "../../utils/formatters";
+import { intentLabel, intentColor, formatNumber } from "../../utils/formatters";
+import Skeleton from "../common/Skeleton";
+import EmptyState from "../common/EmptyState";
 
 export default function IntentClassification() {
-  const { data, loading } = useIntentBreakdown();
+  const { range } = useTimeRange();
+  const { data, loading } = useIntentBreakdown(range.days);
+  const navigate = useNavigate();
 
-  if (loading) return <div className="text-gray-500 text-center py-8">Loading...</div>;
+  if (loading && data.length === 0) return <Skeleton rows={10} />;
+
+  if (data.length === 0) {
+    return (
+      <EmptyState
+        icon={Crosshair}
+        title="No classified activity in this range"
+        hint="Commands are classified as attackers run them — widen the time range to see more."
+      />
+    );
+  }
 
   const chartData = data.map((d) => ({
     name: intentLabel(d.intent),
@@ -31,7 +48,12 @@ export default function IntentClassification() {
           </thead>
           <tbody>
             {data.map((d) => (
-              <tr key={d.intent} className="border-b border-gray-800 hover:bg-gray-700/30">
+              <tr
+                key={d.intent}
+                onClick={() => navigate(`/attempts?intent=${encodeURIComponent(d.intent)}`)}
+                title={`View ${intentLabel(d.intent)} attempts`}
+                className="border-b border-gray-800 hover:bg-gray-700/30 cursor-pointer"
+              >
                 <td className="p-2">
                   <span
                     className="inline-block w-2 h-2 rounded-full mr-2"
@@ -41,7 +63,7 @@ export default function IntentClassification() {
                 </td>
                 <td className="p-2 font-mono text-cyan-400">{d.mitre_id || "—"}</td>
                 <td className="p-2 text-right font-mono text-orange-400">
-                  {d.count.toLocaleString()}
+                  {formatNumber(d.count)}
                 </td>
                 <td className="p-2 text-right text-gray-400">{d.percentage}%</td>
               </tr>

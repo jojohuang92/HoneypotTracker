@@ -2,13 +2,15 @@
 
 import asyncio
 import logging
+import time
+from datetime import datetime
 
-from sqlalchemy import func
+from sqlalchemy import select
 
 from app.config import settings
 from app.database import SessionLocal
 from app.models import Attempt, IPScore
-from app.services.abuseipdb import fetch_and_cache_score, CACHE_TTL
+from app.services.abuseipdb import fetch_and_cache_score, CACHE_TTL, RateLimitedError
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,41 @@ logger = logging.getLogger(__name__)
 SCAN_INTERVAL = 60
 # Delay between API calls to respect rate limits
 API_DELAY = 2
+# Don't retry an IP whose lookup errored until this many seconds pass
+FAILURE_BACKOFF = 3600
+# Pause all lookups this long after a 429 (the quota is account-wide)
+QUOTA_COOLOFF = 15 * 60
+
+# ip → time.monotonic() of the last failed lookup
+_failed_ips: dict[str, float] = {}
+
+
+def _recently_failed(ip: str) -> bool:
+    failed_at = _failed_ips.get(ip)
+    return failed_at is not None and (time.monotonic() - failed_at) < FAILURE_BACKOFF
+
+
+def _mark_failed(ip: str) -> None:
+    _failed_ips[ip] = time.monotonic()
+    if len(_failed_ips) > 10_000:
+        now = time.monotonic()
+        for stale in [k for k, v in _failed_ips.items() if (now - v) >= FAILURE_BACKOFF]:
+            del _failed_ips[stale]
+
+
+def _lookup_ip(ip: str) -> dict | None:
+    """Run the blocking AbuseIPDB lookup in a worker thread."""
+    db = SessionLocal()
+    try:
+        result = fetch_and_cache_score(db, ip)
+        if not result:
+            return None
+        return {
+            "abuse_score": result.abuse_score,
+            "isp": result.isp,
+        }
+    finally:
+        db.close()
 
 
 async def auto_lookup_ips():
@@ -30,15 +67,16 @@ async def auto_lookup_ips():
         try:
             db = SessionLocal()
             try:
-                # Find unique IPs that have no cached score at all
-                scored_ips = db.query(IPScore.ip).subquery()
-                unscored = (
+                # Find unique IPs with no fresh cached score.
+                fresh_cutoff = datetime.utcnow() - CACHE_TTL
+                fresh_scores = select(IPScore.ip).where(IPScore.fetched_at >= fresh_cutoff)
+                missing_or_stale = (
                     db.query(Attempt.src_ip)
-                    .filter(~Attempt.src_ip.in_(db.query(scored_ips)))
+                    .filter(~Attempt.src_ip.in_(fresh_scores))
                     .distinct()
                     .all()
                 )
-                new_ips = [row[0] for row in unscored]
+                new_ips = [row[0] for row in missing_or_stale]
             finally:
                 db.close()
 
@@ -46,16 +84,24 @@ async def auto_lookup_ips():
                 logger.info(f"Found {len(new_ips)} IPs without AbuseIPDB scores")
 
             for ip in new_ips:
-                db = SessionLocal()
+                if _recently_failed(ip):
+                    continue
                 try:
-                    result = fetch_and_cache_score(db, ip)
-                    if result:
-                        logger.info(
-                            f"Looked up {ip}: abuse_score={result.abuse_score}, "
-                            f"isp={result.isp}"
-                        )
-                finally:
-                    db.close()
+                    result = await asyncio.to_thread(_lookup_ip, ip)
+                except RateLimitedError:
+                    logger.warning(
+                        "AbuseIPDB quota exhausted — pausing lookups for "
+                        f"{QUOTA_COOLOFF // 60} minutes"
+                    )
+                    await asyncio.sleep(QUOTA_COOLOFF)
+                    break
+                if result:
+                    logger.info(
+                        f"Looked up {ip}: abuse_score={result['abuse_score']}, "
+                        f"isp={result['isp']}"
+                    )
+                else:
+                    _mark_failed(ip)
                 await asyncio.sleep(API_DELAY)
 
         except Exception as e:

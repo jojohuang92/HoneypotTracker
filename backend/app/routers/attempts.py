@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import func, desc
@@ -52,10 +54,15 @@ def list_attempts(
     intent: list[str] | None = Query(None),
     event_id: list[str] | None = Query(None),
     ip: str | None = None,
+    days: float = Query(0, ge=0, le=365),
     db: DBSession = Depends(get_db),
 ):
     query = db.query(Attempt)
 
+    if days > 0:
+        query = query.filter(
+            Attempt.timestamp >= datetime.utcnow() - timedelta(days=days)
+        )
     if country:
         query = query.filter(Attempt.country_code.in_(country))
     if intent:

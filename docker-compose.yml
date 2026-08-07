@@ -1,0 +1,36 @@
+# HoneypotTracker — containerized deployment.
+#
+#   cp backend/.env.example backend/.env   # then edit
+#   docker compose up -d --build
+#
+# Dashboard: http://localhost:8080  (nginx proxies /api to the backend)
+#
+# GeoIP: place GeoLite2-City.mmdb in the honeypot-data volume, e.g.
+#   docker compose cp GeoLite2-City.mmdb backend:/app/data/
+
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - path: backend/.env
+        required: false
+    environment:
+      # The Cowrie log directory is mounted read-only below
+      COWRIE_LOG_PATH: /cowrie/cowrie.json
+    volumes:
+      - honeypot-data:/app/data
+      - ${COWRIE_LOG_DIR:-/var/log/cowrie}:/cowrie:ro
+    # Intentionally no published ports: only nginx can reach the API, which
+    # keeps --forwarded-allow-ips "*" in the backend image safe.
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  honeypot-data:

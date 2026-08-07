@@ -151,3 +151,55 @@ class TestTimeline:
         buckets = {b["bucket"]: b["count"] for b in data}
         assert buckets.get(yesterday.strftime("%Y-%m-%d")) == 1
         assert buckets.get(today.strftime("%Y-%m-%d")) == 1
+
+
+class TestDaysWindow:
+    """The optional ?days= param scopes aggregates to a trailing window."""
+
+    def _seed_old_and_new(self, db_session):
+        # Windows trail from the real clock, so seed relative to utcnow
+        # rather than the fixed NOW used elsewhere.
+        now = datetime.utcnow()
+        make_attempt(db_session, src_ip="1.1.1.1", country_code="US",
+                     command="whoami", intent="reconnaissance",
+                     timestamp=now - timedelta(days=10), session_id="old")
+        make_attempt(db_session, src_ip="2.2.2.2", country_code="CN",
+                     command="uname -a", intent="brute_force",
+                     timestamp=now - timedelta(minutes=5), session_id="new")
+
+    def test_overview_windowed(self, client, db_session):
+        self._seed_old_and_new(db_session)
+        data = client.get("/api/stats/overview?days=7").json()
+        assert data["total_attempts"] == 1
+        assert data["unique_ips"] == 1
+        assert data["unique_countries"] == 1
+        # previous 7d window (7–14 days ago) holds the old attempt
+        assert data["prev_attempts"] == 1
+
+    def test_overview_all_time_has_no_prev(self, client, db_session):
+        self._seed_old_and_new(db_session)
+        data = client.get("/api/stats/overview").json()
+        assert data["total_attempts"] == 2
+        assert data["prev_attempts"] is None
+
+    def test_countries_windowed(self, client, db_session):
+        self._seed_old_and_new(db_session)
+        data = client.get("/api/stats/countries?days=7").json()
+        assert [c["country_code"] for c in data] == ["CN"]
+        assert data[0]["percentage"] == 100.0
+
+    def test_commands_windowed(self, client, db_session):
+        self._seed_old_and_new(db_session)
+        data = client.get("/api/stats/commands?days=7").json()
+        assert [c["command"] for c in data] == ["uname -a"]
+
+    def test_intents_windowed(self, client, db_session):
+        self._seed_old_and_new(db_session)
+        data = client.get("/api/stats/intents?days=7").json()
+        assert [i["intent"] for i in data] == ["brute_force"]
+
+    def test_attempts_windowed(self, client, db_session):
+        self._seed_old_and_new(db_session)
+        data = client.get("/api/attempts?days=7").json()
+        assert data["total"] == 1
+        assert data["items"][0]["session_id"] == "new"

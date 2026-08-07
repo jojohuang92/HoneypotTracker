@@ -14,6 +14,7 @@ import type {
   AttackerProfile,
   SearchResult,
   Attempt,
+  MitreMatrix,
 } from "../types";
 
 const POLL_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes
@@ -46,13 +47,20 @@ function useAPI<T>(path: string, defaultValue: T) {
   return { data, loading, refresh };
 }
 
-export function useOverview() {
-  return useAPI<OverviewStats>("/stats/overview", {
+/** Append the shared time-window param (0 = all time = no param). */
+function withDays(path: string, days: number): string {
+  if (!days) return path;
+  return path.includes("?") ? `${path}&days=${days}` : `${path}?days=${days}`;
+}
+
+export function useOverview(days = 0) {
+  return useAPI<OverviewStats>(withDays("/stats/overview", days), {
     total_attempts: 0,
     unique_ips: 0,
     unique_countries: 0,
     attacks_today: 0,
     active_sessions: 0,
+    prev_attempts: null,
   });
 }
 
@@ -66,8 +74,9 @@ export interface AttemptFilters {
   intents?: string[];
 }
 
-export function useAttempts(page = 1, limit = 50, filters?: AttemptFilters) {
+export function useAttempts(page = 1, limit = 50, filters?: AttemptFilters, days = 0) {
   let params = `page=${page}&limit=${limit}`;
+  if (days) params += `&days=${days}`;
   if (filters?.countries?.length) {
     params += filters.countries.map((c) => `&country=${encodeURIComponent(c)}`).join("");
   }
@@ -99,20 +108,20 @@ export function useFilterOptions() {
   });
 }
 
-export function useCountryRanks() {
-  return useAPI<CountryRank[]>("/stats/countries?limit=20", []);
+export function useCountryRanks(days = 0) {
+  return useAPI<CountryRank[]>(withDays("/stats/countries?limit=20", days), []);
 }
 
-export function useIntentBreakdown() {
-  return useAPI<IntentBreakdown[]>("/stats/intents", []);
+export function useIntentBreakdown(days = 0) {
+  return useAPI<IntentBreakdown[]>(withDays("/stats/intents", days), []);
 }
 
-export function useCommandRanks() {
-  return useAPI<CommandRank[]>("/stats/commands?limit=20", []);
+export function useCommandRanks(days = 0) {
+  return useAPI<CommandRank[]>(withDays("/stats/commands?limit=20", days), []);
 }
 
-export function useCredentials() {
-  return useAPI<CredentialPair[]>("/stats/credentials?limit=20", []);
+export function useCredentials(days = 0) {
+  return useAPI<CredentialPair[]>(withDays("/stats/credentials?limit=20", days), []);
 }
 
 export function useCapturedFiles() {
@@ -154,7 +163,11 @@ export function useTimeline(granularity = "hour", days = 7) {
 }
 
 export function useUniqueIPs() {
-  return useAPI<UniqueIP[]>("/ips?limit=100", []);
+  return useAPI<UniqueIP[]>("/ips", []);
+}
+
+export function useMitreMatrix(days = 0) {
+  return useAPI<MitreMatrix>(withDays("/stats/mitre", days), { tactics: [], grand_total: 0 });
 }
 
 export function useAttackerProfile(ip: string) {

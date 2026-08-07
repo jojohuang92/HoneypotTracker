@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 
 
@@ -25,8 +25,7 @@ class AttemptOut(BaseModel):
     intent: str | None = None
     mitre_id: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GeoPin(BaseModel):
@@ -47,6 +46,9 @@ class OverviewStats(BaseModel):
     unique_countries: int
     attacks_today: int
     active_sessions: int
+    # Attempts in the window of equal length immediately before the requested
+    # window; only set when the request scopes to a window (days > 0).
+    prev_attempts: int | None = None
 
 
 class CountryRank(BaseModel):
@@ -96,8 +98,7 @@ class CapturedFileOut(BaseModel):
     yara_matches: str | None = None
     malware_family: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UniqueIP(BaseModel):
@@ -131,8 +132,7 @@ class SessionSummary(BaseModel):
     commands_run: int = 0
     files_downloaded: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AttackerProfile(BaseModel):
@@ -163,3 +163,31 @@ class SearchResult(BaseModel):
     items: list[AttemptOut]
     total: int
     query: str
+
+
+# -- MITRE ATT&CK --
+
+class MitreTechnique(BaseModel):
+    mitre_id: str
+    technique_name: str
+    tactic_id: str
+    tactic_name: str
+    count: int
+
+
+class MitreTactic(BaseModel):
+    tactic_id: str
+    tactic_name: str
+    total: int
+    techniques: list[MitreTechnique]
+
+
+class MitreMatrix(BaseModel):
+    tactics: list[MitreTactic]
+    grand_total: int
+
+
+# -- Meta --
+
+class HoneypotMeta(BaseModel):
+    label: str | None = None

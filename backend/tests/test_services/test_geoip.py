@@ -45,7 +45,10 @@ class TestGeoIPLookup:
         result = geo.lookup("8.8.8.8")
         assert result.country_code == ""
         assert result.city == ""
-        assert result.latitude == 0.0
+        # Unknown location must be None, not 0.0 — otherwise the dashboard
+        # renders a phantom pin at "Null Island" (0, 0)
+        assert result.latitude is None
+        assert result.longitude is None
 
     def test_reader_returns_none(self):
         geo = GeoIPLookup.__new__(GeoIPLookup)
