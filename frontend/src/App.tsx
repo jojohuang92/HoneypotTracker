@@ -1,12 +1,16 @@
 import { useOverview, useGeoPins } from "./hooks/useAttempts";
 import { useSSE } from "./hooks/useSSE";
 import AttackMap from "./components/Map/AttackMap";
+import { threatLegend } from "./components/Map/threatScale";
 import DashboardPanel from "./components/Dashboard/DashboardPanel";
 import Sidebar from "./components/layout/Sidebar";
 import LiveIndicator from "./components/common/LiveIndicator";
 import { useRef, useState, useEffect, useCallback } from "react";
 import type { CSSProperties } from "react";
 import { formatNumber } from "./utils/formatters";
+
+const OVERLAY_CARD =
+  "bg-gray-950/80 backdrop-blur-md rounded-lg border border-gray-800 shadow-lg shadow-black/20";
 
 const MIN_DASH_WIDTH = 320;
 const MAX_DASH_WIDTH = 900;
@@ -78,26 +82,46 @@ function App() {
         <AttackMap pins={pins} lastEvent={lastEvent} containerWidth={mapWidth} />
 
         {/* Overlay: Live indicator */}
-        <div className="absolute top-4 left-4 z-[1000] bg-gray-900/80 backdrop-blur-sm rounded-lg px-3 py-2 border border-gray-700/50">
+        <div className={`absolute top-4 left-4 z-[1000] px-3 py-2 ${OVERLAY_CARD}`}>
           <LiveIndicator connected={isConnected} />
         </div>
 
+        {/* Overlay: threat legend */}
+        {pins.length > 0 && (
+          <div className={`absolute top-4 right-4 z-[1000] hidden md:block px-3 py-2.5 ${OVERLAY_CARD}`}>
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
+              Attacks per source
+            </div>
+            <div className="space-y-1.5">
+              {threatLegend(pins).map(({ color, label }) => (
+                <div key={color} className="flex items-center gap-2">
+                  <span
+                    className="w-2.5 h-2.5 rounded-full border border-white/40"
+                    style={{ background: color, boxShadow: `0 0 6px ${color}99` }}
+                  />
+                  <span className="text-[11px] font-mono text-gray-400">{label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Overlay: All-time quick stats */}
-        <div className="absolute bottom-4 left-4 z-[1000] hidden sm:flex bg-gray-900/80 backdrop-blur-sm rounded-lg px-4 py-2 border border-gray-700/50 gap-6">
+        <div className={`absolute bottom-4 left-4 z-[1000] hidden sm:flex px-4 py-2.5 gap-6 ${OVERLAY_CARD}`}>
           <div>
-            <div className="text-lg font-bold text-red-400">
+            <div className="text-lg font-bold tabular-nums text-red-400">
               {formatNumber(stats.total_attempts)}
             </div>
             <div className="text-[10px] text-gray-500 uppercase tracking-wider">Total Attacks</div>
           </div>
           <div>
-            <div className="text-lg font-bold text-blue-400">
+            <div className="text-lg font-bold tabular-nums text-blue-400">
               {formatNumber(stats.unique_ips)}
             </div>
             <div className="text-[10px] text-gray-500 uppercase tracking-wider">Unique IPs</div>
           </div>
           <div>
-            <div className="text-lg font-bold text-green-400">
+            <div className="text-lg font-bold tabular-nums text-green-400">
               {stats.unique_countries}
             </div>
             <div className="text-[10px] text-gray-500 uppercase tracking-wider">Countries</div>

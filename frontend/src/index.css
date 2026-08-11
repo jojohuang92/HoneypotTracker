@@ -10,69 +10,209 @@
   }
 }
 
-/* Leaflet overrides for dark theme */
+/* ── Leaflet: dark chrome ──────────────────────────────────────── */
+
 .leaflet-container {
-  background: #0f172a !important;
+  /* Matches the CARTO dark-matter ocean so max-bounds edges are seamless */
+  background: #262626 !important;
+  font-family: inherit;
 }
 
-.leaflet-popup-content-wrapper {
-  @apply bg-gray-800 text-gray-100 rounded-lg shadow-xl border border-gray-700;
+.leaflet-marker-icon:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+  border-radius: 9999px;
 }
 
-.leaflet-popup-tip {
-  background: #1f2937 !important;
+/* Zoom control */
+.leaflet-bar {
+  border: 1px solid rgba(55, 65, 81, 0.6) !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45) !important;
+}
+.leaflet-bar a {
+  background: rgba(17, 24, 39, 0.85) !important;
+  color: #d1d5db !important;
+  border-bottom: 1px solid rgba(55, 65, 81, 0.6) !important;
+  width: 30px !important;
+  height: 30px !important;
+  line-height: 30px !important;
+  backdrop-filter: blur(4px);
+  transition: background-color 0.15s, color 0.15s;
+}
+.leaflet-bar a:last-child {
+  border-bottom: none !important;
+}
+.leaflet-bar a:hover {
+  background: rgba(31, 41, 55, 0.95) !important;
+  color: #fff !important;
+}
+.leaflet-bar a.leaflet-disabled {
+  background: rgba(17, 24, 39, 0.85) !important;
+  color: #4b5563 !important;
 }
 
-.leaflet-popup-close-button {
+/* Attribution */
+.leaflet-control-attribution {
+  background: rgba(3, 7, 18, 0.55) !important;
+  color: #6b7280 !important;
+  font-size: 10px !important;
+  padding: 1px 6px;
+  backdrop-filter: blur(4px);
+  border-radius: 4px 0 0 0;
+}
+.leaflet-control-attribution a {
   color: #9ca3af !important;
 }
 
-/* Attack pin pulse animation */
-@keyframes attack-pulse {
+/* Tooltip */
+.leaflet-tooltip {
+  background: rgba(17, 24, 39, 0.95) !important;
+  border: 1px solid rgba(75, 85, 99, 0.55) !important;
+  color: #e5e7eb !important;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  padding: 4px 9px;
+}
+.leaflet-tooltip-top::before {
+  border-top-color: rgba(75, 85, 99, 0.55) !important;
+}
+.leaflet-tooltip-bottom::before {
+  border-bottom-color: rgba(75, 85, 99, 0.55) !important;
+}
+
+/* Popup */
+.leaflet-popup-content-wrapper {
+  @apply bg-gray-900 text-gray-100 rounded-xl border border-gray-700/60;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+.leaflet-popup-content {
+  margin: 12px 14px !important;
+  line-height: 1.5 !important;
+}
+.leaflet-popup-tip {
+  background: #111827 !important;
+}
+.leaflet-popup-close-button {
+  color: #6b7280 !important;
+  transition: color 0.15s;
+}
+.leaflet-popup-close-button:hover {
+  color: #fff !important;
+  background: transparent !important;
+}
+
+/* ── Attack pins ───────────────────────────────────────────────── */
+
+.attack-pin {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 9999px;
+  background: radial-gradient(
+    circle at 32% 30%,
+    color-mix(in srgb, var(--pin) 55%, #fff),
+    var(--pin) 65%
+  );
+  border: 1px solid rgb(255 255 255 / 0.75);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--pin) 22%, transparent),
+    0 0 10px 1px color-mix(in srgb, var(--pin) 60%, transparent),
+    0 1px 2px rgb(0 0 0 / 0.6);
+  transition: transform 0.12s ease-out;
+}
+.attack-pin:hover {
+  transform: scale(1.3);
+}
+
+/* ── Marker clusters ───────────────────────────────────────────── */
+
+.attack-cluster {
+  --c: #3b82f6;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--c) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 45%, transparent);
+  transition: transform 0.12s ease-out;
+}
+.attack-cluster:hover {
+  transform: scale(1.08);
+}
+.attack-cluster > span {
+  display: grid;
+  place-items: center;
+  width: 68%;
+  height: 68%;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--c) 80%, #0b1220);
+  border: 1px solid rgb(255 255 255 / 0.35);
+  color: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.5);
+}
+.attack-cluster--mid {
+  --c: #f59e0b;
+}
+.attack-cluster--high {
+  --c: #ef4444;
+}
+
+/* ── Live attack ping ──────────────────────────────────────────── */
+
+.attack-ping {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.attack-ping > i {
+  position: absolute;
+  inset: 35%;
+  border-radius: 9999px;
+  background: #ef4444;
+  box-shadow: 0 0 8px #ef4444;
+}
+.attack-ping::before,
+.attack-ping::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 2px solid #ef4444;
+  opacity: 0;
+  animation: attack-ping 1.6s cubic-bezier(0, 0, 0.2, 1) forwards;
+}
+.attack-ping::after {
+  animation-delay: 0.4s;
+}
+
+@keyframes attack-ping {
   0% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(1.8);
-    opacity: 0.4;
+    transform: scale(0.25);
+    opacity: 0.9;
   }
   100% {
-    transform: scale(2.5);
+    transform: scale(3.2);
     opacity: 0;
   }
 }
 
-.attack-pulse {
-  animation: attack-pulse 1.5s ease-out;
-}
-
-/* Marker cluster styles */
-.marker-cluster-small {
-  background-color: rgba(59, 130, 246, 0.3) !important;
-}
-.marker-cluster-small div {
-  background-color: rgba(59, 130, 246, 0.7) !important;
-  color: white !important;
-  font-weight: 600 !important;
-}
-
-.marker-cluster-medium {
-  background-color: rgba(245, 158, 11, 0.3) !important;
-}
-.marker-cluster-medium div {
-  background-color: rgba(245, 158, 11, 0.7) !important;
-  color: white !important;
-  font-weight: 600 !important;
-}
-
-.marker-cluster-large {
-  background-color: rgba(239, 68, 68, 0.3) !important;
-}
-.marker-cluster-large div {
-  background-color: rgba(239, 68, 68, 0.7) !important;
-  color: white !important;
-  font-weight: 600 !important;
+@media (prefers-reduced-motion: reduce) {
+  .attack-ping::before,
+  .attack-ping::after {
+    animation: none;
+  }
+  .attack-pin,
+  .attack-cluster {
+    transition: none;
+  }
 }
 
 /* Custom scrollbar */

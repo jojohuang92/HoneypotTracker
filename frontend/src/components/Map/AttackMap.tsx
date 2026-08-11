@@ -1,50 +1,50 @@
-import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap } from "react-leaflet";
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  Tooltip,
+  useMap,
+  ZoomControl,
+  Pane,
+} from "react-leaflet";
 import MarkerClusterGroup from "react-leaflet-cluster";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { GeoPin, LiveAttackEvent } from "../../types";
-import { formatTimestamp } from "../../utils/formatters";
-import { useEffect } from "react";
+import { formatTimestamp, formatNumber } from "../../utils/formatters";
+import { useEffect, useMemo } from "react";
+import { computeThreatScale, gradeFor, compactCount, type ThreatScale } from "./threatScale";
 
-// Fix default marker icons in bundled builds
-import iconUrl from "leaflet/dist/images/marker-icon.png";
-import iconShadowUrl from "leaflet/dist/images/marker-shadow.png";
-import iconRetinaUrl from "leaflet/dist/images/marker-icon-2x.png";
-
-L.Icon.Default.mergeOptions({
-  iconUrl,
-  iconRetinaUrl,
-  shadowUrl: iconShadowUrl,
-});
-
-function createPinIcon(count: number) {
-  let color = "#3b82f6"; // blue
-  let size = 10;
-  if (count > 20) {
-    color = "#ef4444"; // red
-    size = 16;
-  } else if (count > 10) {
-    color = "#f97316"; // orange
-    size = 14;
-  } else if (count > 5) {
-    color = "#eab308"; // yellow
-    size = 12;
-  }
-
+function createPinIcon(count: number, scale: ThreatScale) {
+  const { color, size } = gradeFor(count, scale);
   return L.divIcon({
     className: "",
-    html: `<div style="
-      width: ${size}px;
-      height: ${size}px;
-      background: ${color};
-      border: 2px solid rgba(255,255,255,0.8);
-      border-radius: 50%;
-      box-shadow: 0 0 ${size}px ${color}80;
-    "></div>`,
+    html: `<span class="attack-pin" style="--pin:${color}"></span>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
   });
 }
+
+function createClusterIcon(cluster: { getChildCount: () => number }) {
+  const count = cluster.getChildCount();
+  const grade = count >= 100 ? " attack-cluster--high" : count >= 25 ? " attack-cluster--mid" : "";
+  const size = count >= 100 ? 44 : count >= 25 ? 38 : 32;
+  const label = compactCount(count);
+  return L.divIcon({
+    className: "",
+    html: `<div class="attack-cluster${grade}"><span>${label}</span></div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
+
+const PING_ICON = L.divIcon({
+  className: "",
+  html: '<span class="attack-ping"><i></i></span>',
+  iconSize: [14, 14],
+  iconAnchor: [7, 7],
+});
 
 interface NewAttackAnimatorProps {
   lastEvent: LiveAttackEvent | null;
@@ -56,20 +56,16 @@ function NewAttackAnimator({ lastEvent }: NewAttackAnimatorProps) {
   useEffect(() => {
     if (lastEvent?.latitude == null || lastEvent?.longitude == null) return;
 
-    const src: [number, number] = [lastEvent.latitude, lastEvent.longitude];
-
-    const pulse = L.circleMarker(src, {
-      radius: 20,
-      color: "#ef4444",
-      fillColor: "#ef4444",
-      fillOpacity: 0.4,
-      weight: 2,
-      className: "attack-pulse",
+    const ping = L.marker([lastEvent.latitude, lastEvent.longitude], {
+      icon: PING_ICON,
+      interactive: false,
+      keyboard: false,
     }).addTo(map);
-    setTimeout(() => map.removeLayer(pulse), 2000);
+    const timer = setTimeout(() => map.removeLayer(ping), 2200);
 
     return () => {
-      map.removeLayer(pulse);
+      clearTimeout(timer);
+      map.removeLayer(ping);
     };
   }, [lastEvent, map]);
 
@@ -94,23 +90,35 @@ interface AttackMapProps {
 const WORLD_BOUNDS: L.LatLngBoundsExpression = [[-85, -180], [85, 180]];
 
 export default function AttackMap({ pins, onPinClick, lastEvent, containerWidth }: AttackMapProps) {
+  const scale = useMemo(() => computeThreatScale(pins), [pins]);
+
   return (
     <MapContainer
-      center={[20, 0]}
+      center={[22, 0]}
       zoom={2}
       minZoom={2}
       maxZoom={18}
       maxBounds={WORLD_BOUNDS}
       maxBoundsViscosity={1.0}
       className="h-full w-full"
-      zoomControl={true}
+      zoomControl={false}
       scrollWheelZoom={true}
     >
       <TileLayer
-        attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+        url="https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png"
         noWrap={true}
       />
+      {/* Place labels above the basemap but below markers, dimmed so pins stay dominant */}
+      <Pane name="labels" style={{ zIndex: 210, pointerEvents: "none" }}>
+        <TileLayer
+          url="https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png"
+          noWrap={true}
+          opacity={0.55}
+        />
+      </Pane>
+
+      <ZoomControl position="bottomright" />
 
       <MapResizer width={containerWidth ?? 0} />
       {lastEvent && <NewAttackAnimator lastEvent={lastEvent} />}
@@ -120,51 +128,55 @@ export default function AttackMap({ pins, onPinClick, lastEvent, containerWidth 
         maxClusterRadius={50}
         spiderfyOnMaxZoom
         showCoverageOnHover={false}
+        iconCreateFunction={createClusterIcon}
       >
         {pins.map((pin, i) => (
           <Marker
             key={`${pin.latitude}-${pin.longitude}-${i}`}
             position={[pin.latitude, pin.longitude]}
-            icon={createPinIcon(pin.count)}
+            icon={createPinIcon(pin.count, scale)}
             eventHandlers={{
               click: () => onPinClick?.(pin),
             }}
           >
-            <Tooltip direction="top" offset={[0, -6]} opacity={0.9}>
-              <span style={{ fontFamily: "monospace", fontSize: "12px" }}>
+            <Tooltip direction="top" offset={[0, -8]} opacity={1}>
+              <span className="font-mono text-xs">
                 {[pin.city, pin.country_code].filter(Boolean).join(", ") || "Unknown"}
                 {" · "}
-                <strong>{pin.count}</strong>
+                <strong>{formatNumber(pin.count)}</strong>
               </span>
             </Tooltip>
             <Popup>
-              <div className="min-w-[200px] text-sm">
-                <div className="font-bold text-white mb-1">
-                  {[pin.city, pin.country_name].filter(Boolean).join(", ") || "Unknown"}
+              <div className="min-w-[220px] text-sm">
+                <div className="flex items-center justify-between gap-3 border-b border-gray-700/60 pb-2 mb-2">
+                  <span className="font-semibold text-gray-100">
+                    {[pin.city, pin.country_name].filter(Boolean).join(", ") || "Unknown location"}
+                  </span>
                   {pin.country_code && (
-                    <span className="ml-1 text-gray-400 font-normal">
-                      ({pin.country_code})
+                    <span className="shrink-0 rounded border border-gray-600/60 bg-gray-800 px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-gray-300">
+                      {pin.country_code}
                     </span>
                   )}
                 </div>
-                <div className="space-y-1 text-gray-300">
-                  <div>
-                    <span className="text-gray-500">IP:</span>{" "}
-                    <span className="font-mono">{pin.latest_src_ip}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500">Attacks:</span>{" "}
-                    <span className="font-bold text-orange-400">{pin.count}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500">Latest:</span>{" "}
-                    {pin.latest_timestamp && formatTimestamp(pin.latest_timestamp)}
-                  </div>
-                  <div>
-                    <span className="text-gray-500">Type:</span>{" "}
-                    {pin.latest_event_id?.replace("cowrie.", "")}
-                  </div>
-                </div>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
+                  <dt className="text-gray-500">Source IP</dt>
+                  <dd className="font-mono text-gray-200">{pin.latest_src_ip}</dd>
+                  <dt className="text-gray-500">Attacks</dt>
+                  <dd
+                    className="font-mono font-semibold tabular-nums"
+                    style={{ color: gradeFor(pin.count, scale).color }}
+                  >
+                    {formatNumber(pin.count)}
+                  </dd>
+                  <dt className="text-gray-500">Last seen</dt>
+                  <dd className="text-gray-300">
+                    {pin.latest_timestamp ? formatTimestamp(pin.latest_timestamp) : "—"}
+                  </dd>
+                  <dt className="text-gray-500">Last event</dt>
+                  <dd className="font-mono text-gray-300">
+                    {pin.latest_event_id?.replace("cowrie.", "") ?? "—"}
+                  </dd>
+                </dl>
               </div>
             </Popup>
           </Marker>
