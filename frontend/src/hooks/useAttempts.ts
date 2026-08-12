@@ -15,6 +15,12 @@ import type {
   SearchResult,
   Attempt,
   MitreMatrix,
+  Sensor,
+  SensorOverlap,
+  CampaignGroup,
+  CredentialStat,
+  HourBucket,
+  ThreatScoreDetail,
 } from "../types";
 
 const POLL_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes
@@ -47,14 +53,22 @@ function useAPI<T>(path: string, defaultValue: T) {
   return { data, loading, refresh };
 }
 
-/** Append the shared time-window param (0 = all time = no param). */
-function withDays(path: string, days: number): string {
-  if (!days) return path;
-  return path.includes("?") ? `${path}&days=${days}` : `${path}?days=${days}`;
+/** Append query params, skipping empty ones, regardless of existing "?". */
+function withParams(path: string, params: Record<string, string | number | undefined | null>): string {
+  const parts = Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null && v !== "" && v !== 0)
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`);
+  if (parts.length === 0) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}${parts.join("&")}`;
 }
 
-export function useOverview(days = 0) {
-  return useAPI<OverviewStats>(withDays("/stats/overview", days), {
+/** Shared scope for every aggregate view: time window plus sensor. */
+function withScope(path: string, days: number, sensor?: string | null): string {
+  return withParams(path, { days, sensor });
+}
+
+export function useOverview(days = 0, sensor?: string | null) {
+  return useAPI<OverviewStats>(withScope("/stats/overview", days, sensor), {
     total_attempts: 0,
     unique_ips: 0,
     unique_countries: 0,
@@ -64,8 +78,48 @@ export function useOverview(days = 0) {
   });
 }
 
-export function useGeoPins() {
-  return useAPI<GeoPin[]>("/geo/pins?limit=500", []);
+export function useGeoPins(sensor?: string | null) {
+  return useAPI<GeoPin[]>(withScope("/geo/pins?limit=500", 0, sensor), []);
+}
+
+export function useSensors() {
+  return useAPI<Sensor[]>("/sensors", []);
+}
+
+export function useSensorOverlap(days = 7) {
+  return useAPI<SensorOverlap>(withParams("/sensors/overlap", { days }), {
+    days,
+    sensors_reporting: 0,
+    total_ips: 0,
+    shared_ips: 0,
+    overlap_rate: 0,
+    exclusive_by_sensor: {},
+    pairs: [],
+    top_shared: [],
+  });
+}
+
+export function useCampaigns(days = 7, sensor?: string | null) {
+  return useAPI<CampaignGroup[]>(withParams("/campaigns", { days, sensor }), []);
+}
+
+export function useTopUsernames(days = 0, sensor?: string | null) {
+  return useAPI<CredentialStat[]>(withScope("/stats/usernames?limit=20", days, sensor), []);
+}
+
+export function useTopPasswords(days = 0, sensor?: string | null) {
+  return useAPI<CredentialStat[]>(withScope("/stats/passwords?limit=20", days, sensor), []);
+}
+
+export function useHourly(days = 30, sensor?: string | null) {
+  return useAPI<HourBucket[]>(withParams("/stats/hourly", { days, sensor }), []);
+}
+
+export function useThreatScore(ip: string) {
+  return useAPI<ThreatScoreDetail | null>(
+    ip ? `/ips/${encodeURIComponent(ip)}/threat` : "",
+    null
+  );
 }
 
 export interface AttemptFilters {
@@ -74,9 +128,16 @@ export interface AttemptFilters {
   intents?: string[];
 }
 
-export function useAttempts(page = 1, limit = 50, filters?: AttemptFilters, days = 0) {
+export function useAttempts(
+  page = 1,
+  limit = 50,
+  filters?: AttemptFilters,
+  days = 0,
+  sensor?: string | null,
+) {
   let params = `page=${page}&limit=${limit}`;
   if (days) params += `&days=${days}`;
+  if (sensor) params += `&sensor=${encodeURIComponent(sensor)}`;
   if (filters?.countries?.length) {
     params += filters.countries.map((c) => `&country=${encodeURIComponent(c)}`).join("");
   }
@@ -108,20 +169,20 @@ export function useFilterOptions() {
   });
 }
 
-export function useCountryRanks(days = 0) {
-  return useAPI<CountryRank[]>(withDays("/stats/countries?limit=20", days), []);
+export function useCountryRanks(days = 0, sensor?: string | null) {
+  return useAPI<CountryRank[]>(withScope("/stats/countries?limit=20", days, sensor), []);
 }
 
-export function useIntentBreakdown(days = 0) {
-  return useAPI<IntentBreakdown[]>(withDays("/stats/intents", days), []);
+export function useIntentBreakdown(days = 0, sensor?: string | null) {
+  return useAPI<IntentBreakdown[]>(withScope("/stats/intents", days, sensor), []);
 }
 
-export function useCommandRanks(days = 0) {
-  return useAPI<CommandRank[]>(withDays("/stats/commands?limit=20", days), []);
+export function useCommandRanks(days = 0, sensor?: string | null) {
+  return useAPI<CommandRank[]>(withScope("/stats/commands?limit=20", days, sensor), []);
 }
 
-export function useCredentials(days = 0) {
-  return useAPI<CredentialPair[]>(withDays("/stats/credentials?limit=20", days), []);
+export function useCredentials(days = 0, sensor?: string | null) {
+  return useAPI<CredentialPair[]>(withScope("/stats/credentials?limit=20", days, sensor), []);
 }
 
 export function useCapturedFiles() {
@@ -154,20 +215,29 @@ export function useTopPorts() {
   return useAPI<PortStat[]>("/stats/ports?limit=10", []);
 }
 
-export function useTimeline(granularity = "hour", days = 7) {
+export function useTimeline(granularity = "hour", days = 7, sensor?: string | null) {
   const tzOffset = -new Date().getTimezoneOffset(); // minutes ahead of UTC
   return useAPI<TimelineBucket[]>(
-    `/stats/timeline?granularity=${granularity}&days=${days}&tz_offset=${tzOffset}`,
+    withParams(
+      `/stats/timeline?granularity=${granularity}&days=${days}&tz_offset=${tzOffset}`,
+      { sensor }
+    ),
     []
   );
 }
 
-export function useUniqueIPs() {
-  return useAPI<UniqueIP[]>("/ips", []);
+export function useUniqueIPs(sensor?: string | null, scored = false) {
+  return useAPI<UniqueIP[]>(
+    withParams("/ips", { sensor, scored: scored ? "true" : undefined }),
+    []
+  );
 }
 
-export function useMitreMatrix(days = 0) {
-  return useAPI<MitreMatrix>(withDays("/stats/mitre", days), { tactics: [], grand_total: 0 });
+export function useMitreMatrix(days = 0, sensor?: string | null) {
+  return useAPI<MitreMatrix>(withScope("/stats/mitre", days, sensor), {
+    tactics: [],
+    grand_total: 0,
+  });
 }
 
 export function useAttackerProfile(ip: string) {

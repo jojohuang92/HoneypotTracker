@@ -13,11 +13,12 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session as DBSession
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import Attempt, CapturedFile, Session
+from app.models import Attempt, CapturedFile, Sensor, Session
 from app.routers.stream import publish_event
 from app.services import alerts, splunk_forwarder
 from app.services.classifier import classify_command, classify_login
@@ -65,10 +66,12 @@ def _build_attempt(
     src_ip: str,
     timestamp: datetime,
     geo,
+    sensor_id: str,
     **kwargs,
 ) -> Attempt:
     """Construct an Attempt with all common fields pre-populated."""
     return Attempt(
+        sensor_id=sensor_id,
         session_id=session_id,
         event_id=event_id,
         timestamp=timestamp,
@@ -87,9 +90,32 @@ def _build_attempt(
     )
 
 
-def _increment_session_field(db: DBSession, session_id: str, field: str) -> None:
-    """Increment a counter field on the Session row (ingestion is the only writer)."""
-    sess = db.query(Session).filter_by(session_id=session_id).first()
+def _sensor_match(column, sensor_id: str):
+    """Match a sensor, counting unattributed rows as this hub's own.
+
+    Rows written before multi-sensor support have no sensor id. The migration
+    backfills them, but tolerating NULL here keeps ingestion correct against a
+    database that has not been migrated yet.
+    """
+    return or_(column == sensor_id, column.is_(None))
+
+
+def _increment_session_field(
+    db: DBSession, session_id: str, field: str, sensor_id: str
+) -> None:
+    """Increment a counter field on the Session row (ingestion is the only writer).
+
+    Scoped by sensor so a Cowrie session-id collision between two sensors
+    cannot bump the wrong session's counters.
+    """
+    sess = (
+        db.query(Session)
+        .filter(
+            Session.session_id == session_id,
+            _sensor_match(Session.sensor_id, sensor_id),
+        )
+        .first()
+    )
     if sess:
         setattr(sess, field, (getattr(sess, field) or 0) + 1)
 
@@ -100,13 +126,19 @@ def _attempt_base_query(
     session_id: str,
     src_ip: str,
     timestamp: datetime,
+    sensor_id: str,
 ):
-    """Build the common duplicate-detection query for a Cowrie event."""
+    """Build the common duplicate-detection query for a Cowrie event.
+
+    Scoped by sensor so two sensors observing identical events at the same
+    instant are never mistaken for duplicates of each other.
+    """
     return db.query(Attempt).filter(
         Attempt.event_id == event_id,
         Attempt.session_id == session_id,
         Attempt.src_ip == src_ip,
         Attempt.timestamp == timestamp,
+        _sensor_match(Attempt.sensor_id, sensor_id),
     )
 
 
@@ -116,20 +148,28 @@ def _attempt_exists(
     session_id: str,
     src_ip: str,
     timestamp: datetime,
+    sensor_id: str,
     **fields,
 ) -> bool:
-    query = _attempt_base_query(db, event_id, session_id, src_ip, timestamp)
+    query = _attempt_base_query(db, event_id, session_id, src_ip, timestamp, sensor_id)
     for name, value in fields.items():
         column = getattr(Attempt, name)
         query = query.filter(column.is_(None) if value is None else column == value)
     return query.first() is not None
 
 
-def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]:
+def _process_event(
+    event: dict, db: DBSession, sensor_id: str | None = None
+) -> tuple[dict | None, int | None]:
     """Process a single Cowrie JSON event.
+
+    ``sensor_id`` attributes the event to a sensor; it defaults to this hub's
+    own. Geolocation and intent are always derived here, never taken from the
+    payload, so a compromised remote sensor cannot forge either.
 
     Returns (sse_payload, captured_file_id). Either value may be None.
     """
+    sensor_id = sensor_id or settings.sensor_id
     event_id = event.get("eventid", "")
     session_id = event.get("session", "")
     src_ip = event.get("src_ip", "")
@@ -149,6 +189,7 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
         geo = geoip.lookup(src_ip)
         protocol = event.get("protocol", "ssh")
         session_obj = Session(
+            sensor_id=sensor_id,
             session_id=session_id,
             src_ip=src_ip,
             start_time=timestamp,
@@ -167,6 +208,7 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
             "src_ip": src_ip,
             "country": geo.country_name,
             "protocol": protocol,
+            "sensor_id": sensor_id,
         }, None
 
     # --- Login attempt ---
@@ -180,6 +222,7 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
             session_id,
             src_ip,
             timestamp,
+            sensor_id,
             username=username,
             password=password,
         ):
@@ -190,14 +233,14 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
         intent, mitre_id = classify_login(success)
 
         db.add(_build_attempt(
-            event, event_id, session_id, src_ip, timestamp, geo,
+            event, event_id, session_id, src_ip, timestamp, geo, sensor_id,
             username=username,
             password=password,
             success=success,
             intent=intent,
             mitre_id=mitre_id,
         ))
-        _increment_session_field(db, session_id, "login_attempts")
+        _increment_session_field(db, session_id, "login_attempts", sensor_id)
         db.commit()
         return {
             "type": "login_attempt",
@@ -210,6 +253,7 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
             "country": geo.country_name,
             "latitude": geo.latitude,
             "longitude": geo.longitude,
+            "sensor_id": sensor_id,
         }, None
 
     # --- Command input ---
@@ -221,6 +265,7 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
             session_id,
             src_ip,
             timestamp,
+            sensor_id,
             command=command,
         ):
             return None, None
@@ -230,12 +275,12 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
         intent, mitre_id = classify_command(command)
 
         db.add(_build_attempt(
-            event, event_id, session_id, src_ip, timestamp, geo,
+            event, event_id, session_id, src_ip, timestamp, geo, sensor_id,
             command=command,
             intent=intent,
             mitre_id=mitre_id,
         ))
-        _increment_session_field(db, session_id, "commands_run")
+        _increment_session_field(db, session_id, "commands_run", sensor_id)
         db.commit()
         return {
             "type": "command",
@@ -248,6 +293,7 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
             "country": geo.country_name,
             "latitude": geo.latitude,
             "longitude": geo.longitude,
+            "sensor_id": sensor_id,
         }, None
 
     # --- File download/upload ---
@@ -263,6 +309,7 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
             session_id,
             src_ip,
             timestamp,
+            sensor_id,
             command=command,
         ):
             return None, None
@@ -271,7 +318,7 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
         geo = geoip.lookup(src_ip)
 
         attempt = _build_attempt(
-            event, event_id, session_id, src_ip, timestamp, geo,
+            event, event_id, session_id, src_ip, timestamp, geo, sensor_id,
             command=command,
             intent="malware_deployment",
             mitre_id="T1105",
@@ -283,6 +330,7 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
         if sha256:
             captured = CapturedFile(
                 attempt_id=attempt.id,
+                sensor_id=sensor_id,
                 session_id=session_id,
                 timestamp=timestamp,
                 filename=os.path.basename(filename) if filename else "",
@@ -294,7 +342,7 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
             db.flush()
             captured_id = captured.id
 
-        _increment_session_field(db, session_id, "files_downloaded")
+        _increment_session_field(db, session_id, "files_downloaded", sensor_id)
         db.commit()
         return {
             "type": "file_download",
@@ -304,11 +352,19 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
             "url": url,
             "sha256": sha256,
             "country": geo.country_name,
+            "sensor_id": sensor_id,
         }, captured_id
 
     # --- Session closed ---
     elif event_id == "cowrie.session.closed":
-        sess = db.query(Session).filter_by(session_id=session_id).first()
+        sess = (
+            db.query(Session)
+            .filter(
+                Session.session_id == session_id,
+                _sensor_match(Session.sensor_id, sensor_id),
+            )
+            .first()
+        )
         if sess:
             sess.end_time = timestamp
             if sess.start_time:
@@ -318,6 +374,26 @@ def _process_event(event: dict, db: DBSession) -> tuple[dict | None, int | None]
         return None, None
 
     return None, None
+
+
+def process_batch(
+    events: list[dict], db: DBSession, sensor_id: str | None = None
+) -> list[tuple[dict | None, int | None]]:
+    """Process a batch of Cowrie events and mark the sensor as having reported.
+
+    Shared by local log tailing and remote sensor ingestion so both paths
+    normalize, enrich, and classify identically.
+    """
+    sensor_id = sensor_id or settings.sensor_id
+    results = [_process_event(event, db, sensor_id) for event in events]
+
+    # One liveness write per batch rather than per event.
+    if any(payload for payload, _ in results):
+        sensor = db.query(Sensor).filter_by(sensor_id=sensor_id).first()
+        if sensor:
+            sensor.last_event_at = datetime.utcnow()
+            db.commit()
+    return results
 
 
 # Strong references to in-flight fire-and-forget tasks. The event loop only
@@ -379,19 +455,20 @@ async def tail_cowrie_log(log_path: str):
                     lines = f.readlines()
                     position = f.tell()
 
+                batch: list[dict] = []
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        batch.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        logger.debug("Skipping malformed JSON line")
+                        continue
+
                 db = SessionLocal()
                 try:
-                    for line in lines:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            event = json.loads(line)
-                        except json.JSONDecodeError:
-                            logger.debug(f"Skipping malformed JSON line")
-                            continue
-
-                        sse_payload, captured_id = _process_event(event, db)
+                    for sse_payload, captured_id in process_batch(batch, db):
                         _dispatch(sse_payload, captured_id)
                 finally:
                     db.close()

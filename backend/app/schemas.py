@@ -112,6 +112,11 @@ class UniqueIP(BaseModel):
     isp: str | None = None
     usage_type: str | None = None
     total_reports: int | None = None
+    # How many sensors have seen this IP — breadth is corroboration.
+    sensor_count: int = 0
+    # Only populated when scoring is requested (see /api/ips?scored=true).
+    threat_score: int | None = None
+    threat_level: str | None = None
 
 
 class PaginatedAttempts(BaseModel):
@@ -155,6 +160,12 @@ class AttackerProfile(BaseModel):
     top_credentials: list[CredentialPair] = []
     sessions: list[SessionSummary] = []
     timeline: list[TimelineBucket] = []
+    # Composite risk, with the inputs that produced it
+    threat_score: int = 0
+    threat_level: str = "low"
+    threat_components: dict[str, int] = {}
+    threat_reasons: list[str] = []
+    sensors_seen: list[str] = []
 
 
 # -- Search --
@@ -191,3 +202,145 @@ class MitreMatrix(BaseModel):
 
 class HoneypotMeta(BaseModel):
     label: str | None = None
+
+
+# -- Sensors / fleet --
+
+class SensorOut(BaseModel):
+    """A sensor as shown in the dashboard. Coordinates are already coarsened
+    to the sensor's declared precision — raw positions never leave the DB."""
+
+    sensor_id: str
+    label: str
+    is_local: bool
+    enabled: bool
+    country_code: str | None = None
+    country_name: str | None = None
+    city: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    location_precision: str = "country"
+    timezone: str | None = None
+    protocols: list[str] = []
+    status: str = "unknown"          # online | offline | disabled
+    last_event_at: datetime | None = None
+    last_heartbeat_at: datetime | None = None
+    agent_version: str | None = None
+    disk_free_bytes: int | None = None
+    disk_total_bytes: int | None = None
+    low_disk: bool = False
+    total_attempts: int = 0
+    attempts_24h: int = 0
+    unique_ips_24h: int = 0
+    protocol_breakdown: dict[str, int] = {}
+
+
+class SensorCreate(BaseModel):
+    sensor_id: str
+    label: str
+    country_code: str | None = None
+    country_name: str | None = None
+    city: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    location_precision: str = "country"
+    timezone: str | None = None
+    protocols: str = "ssh,telnet"
+
+
+class SensorCreated(BaseModel):
+    """Provisioning response. ``token`` is shown once and never stored."""
+
+    sensor_id: str
+    label: str
+    token: str
+
+
+class IngestEvent(BaseModel):
+    seq: int
+    event: dict
+
+
+class IngestBatch(BaseModel):
+    epoch: str
+    events: list[IngestEvent]
+
+
+class IngestResult(BaseModel):
+    accepted: int
+    skipped: int
+    last_seq: int
+
+
+class HeartbeatIn(BaseModel):
+    epoch: str | None = None
+    agent_version: str | None = None
+    disk_free_bytes: int | None = None
+    disk_total_bytes: int | None = None
+    cowrie_log_age_secs: float | None = None
+
+
+class SensorOverlapPair(BaseModel):
+    sensor_a: str
+    sensor_b: str
+    shared_ips: int
+
+
+class SensorOverlap(BaseModel):
+    """How much attacker traffic is shared between sensors.
+
+    An IP seen by several sensors is indiscriminate scanning; one seen by a
+    single sensor is comparatively targeted. Needs two or more reporting
+    sensors to mean anything, hence ``sensors_reporting``.
+    """
+
+    days: int
+    sensors_reporting: int
+    total_ips: int
+    shared_ips: int
+    overlap_rate: float
+    exclusive_by_sensor: dict[str, int] = {}
+    pairs: list[SensorOverlapPair] = []
+    top_shared: list[dict] = []
+
+
+# -- Threat scoring --
+
+class ThreatScore(BaseModel):
+    """Composite 0-100 risk score with its inputs, so a rank is explainable."""
+
+    src_ip: str
+    total: int
+    level: str  # critical | high | medium | low
+    components: dict[str, int]
+    reasons: list[str] = []
+
+
+# -- Campaigns --
+
+class Campaign(BaseModel):
+    campaign_id: str
+    kind: str  # credentials | payload | commands
+    summary: str
+    ip_count: int
+    event_count: int
+    sensors: list[str] = []
+    countries: list[str] = []
+    asns: list[int] = []
+    first_seen: datetime | None = None
+    last_seen: datetime | None = None
+    sample: list[str] = []
+    ips: list[str] = []
+
+
+# -- Credential analytics --
+
+class CredentialStat(BaseModel):
+    value: str
+    count: int
+    ip_count: int
+
+
+class HourBucket(BaseModel):
+    hour: int
+    count: int

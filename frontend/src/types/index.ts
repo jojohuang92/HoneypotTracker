@@ -51,6 +51,7 @@ export interface LiveAttackEvent {
   url?: string;
   sha256?: string;
   protocol?: string;
+  sensor_id?: string;
 }
 
 export interface OverviewStats {
@@ -129,6 +130,9 @@ export interface UniqueIP {
   isp: string | null;
   usage_type: string | null;
   total_reports: number | null;
+  sensor_count: number;
+  threat_score: number | null;
+  threat_level: string | null;
 }
 
 export interface SessionSummary {
@@ -161,6 +165,11 @@ export interface AttackerProfile {
   top_credentials: CredentialPair[];
   sessions: SessionSummary[];
   timeline: TimelineBucket[];
+  threat_score: number;
+  threat_level: string;
+  threat_components: Record<string, number>;
+  threat_reasons: string[];
+  sensors_seen: string[];
 }
 
 export interface SearchResult {
@@ -189,3 +198,85 @@ export interface MitreMatrix {
   grand_total: number;
 }
 
+
+export interface Sensor {
+  sensor_id: string;
+  label: string;
+  is_local: boolean;
+  enabled: boolean;
+  country_code: string | null;
+  country_name: string | null;
+  city: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  location_precision: string;
+  timezone: string | null;
+  protocols: string[];
+  status: "online" | "offline" | "disabled" | "unknown";
+  last_event_at: string | null;
+  last_heartbeat_at: string | null;
+  agent_version: string | null;
+  disk_free_bytes: number | null;
+  disk_total_bytes: number | null;
+  low_disk: boolean;
+  total_attempts: number;
+  attempts_24h: number;
+  unique_ips_24h: number;
+  protocol_breakdown: Record<string, number>;
+}
+
+export interface SensorOverlapPair {
+  sensor_a: string;
+  sensor_b: string;
+  shared_ips: number;
+}
+
+export interface SensorOverlap {
+  days: number;
+  sensors_reporting: number;
+  total_ips: number;
+  shared_ips: number;
+  overlap_rate: number;
+  exclusive_by_sensor: Record<string, number>;
+  pairs: SensorOverlapPair[];
+  top_shared: {
+    src_ip: string;
+    sensors: string[];
+    total: number;
+    per_sensor: Record<string, number>;
+  }[];
+}
+
+export interface ThreatScoreDetail {
+  src_ip: string;
+  total: number;
+  level: "critical" | "high" | "medium" | "low";
+  components: Record<string, number>;
+  reasons: string[];
+}
+
+export interface CampaignGroup {
+  campaign_id: string;
+  kind: "credentials" | "payload" | "commands";
+  summary: string;
+  ip_count: number;
+  event_count: number;
+  sensors: string[];
+  countries: string[];
+  asns: number[];
+  first_seen: string | null;
+  last_seen: string | null;
+  sample: string[];
+  ips: string[];
+}
+
+export interface CredentialStat {
+  value: string;
+  count: number;
+  ip_count: number;
+}
+
+export interface HourBucket {
+  hour: number;
+  count: number;
+}

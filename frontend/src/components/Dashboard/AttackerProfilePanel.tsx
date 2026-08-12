@@ -129,6 +129,66 @@ export default function AttackerProfilePanel() {
               </div>
             </div>
 
+            {/* Composite threat score, with the reasons behind it */}
+            <div className="bg-gray-800/50 rounded-lg p-3 border border-gray-700/50">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[10px] text-gray-500 uppercase tracking-wider">
+                    Threat score
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className={`text-2xl font-bold tabular-nums ${
+                      profile.threat_level === "critical" ? "text-red-400" :
+                      profile.threat_level === "high" ? "text-orange-400" :
+                      profile.threat_level === "medium" ? "text-yellow-400" : "text-green-400"
+                    }`}>
+                      {profile.threat_score}
+                    </span>
+                    <span className="text-xs text-gray-500">/ 100 · {profile.threat_level}</span>
+                  </div>
+                </div>
+                {profile.sensors_seen.length > 0 && (
+                  <div className="text-right">
+                    <div className="text-[10px] text-gray-500 uppercase tracking-wider">
+                      Seen by
+                    </div>
+                    <div className="text-xs text-gray-300 font-mono">
+                      {profile.sensors_seen.join(", ")}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {Object.keys(profile.threat_components).length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {Object.entries(profile.threat_components).map(([name, value]) => (
+                    <div key={name} className="flex items-center gap-2">
+                      <span className="text-[10px] text-gray-500 w-20 capitalize">{name}</span>
+                      <div className="flex-1 h-1 bg-gray-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-blue-500"
+                          style={{ width: `${Math.min(100, value * 4)}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] font-mono text-gray-400 w-6 text-right">
+                        {value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {profile.threat_reasons.length > 0 && (
+                <ul className="mt-2 space-y-0.5">
+                  {profile.threat_reasons.map((reason) => (
+                    <li key={reason} className="text-[11px] text-gray-400">
+                      · {reason}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
             {/* Stats grid */}
             <div className="grid grid-cols-4 gap-2">
               <StatBox label="Attempts" value={profile.total_attempts} color="text-red-400" />

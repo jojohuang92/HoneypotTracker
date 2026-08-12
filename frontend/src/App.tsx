@@ -1,4 +1,5 @@
 import { useOverview, useGeoPins } from "./hooks/useAttempts";
+import { useSensorScope } from "./context/SensorContext";
 import { useSSE } from "./hooks/useSSE";
 import AttackMap from "./components/Map/AttackMap";
 import { threatLegend } from "./components/Map/threatScale";
@@ -19,8 +20,9 @@ const DEFAULT_DASH_WIDTH = 480;
 function App() {
   // All-time headline numbers for the map overlay, independent of the
   // panel's time-range selector.
-  const { data: stats } = useOverview();
-  const { data: pins } = useGeoPins();
+  const { sensorId, sensors } = useSensorScope();
+  const { data: stats } = useOverview(0, sensorId);
+  const { data: pins } = useGeoPins(sensorId);
 
   const { isConnected, lastEvent } = useSSE("/api/stream/live");
 
@@ -79,7 +81,12 @@ function App() {
 
       {/* Map */}
       <div ref={mapWrapRef} className="relative min-w-0 h-[38dvh] shrink-0 lg:h-auto lg:flex-1">
-        <AttackMap pins={pins} lastEvent={lastEvent} containerWidth={mapWidth} />
+        <AttackMap
+          pins={pins}
+          lastEvent={lastEvent}
+          containerWidth={mapWidth}
+          sensors={sensors}
+        />
 
         {/* Overlay: Live indicator */}
         <div className={`absolute top-4 left-4 z-[1000] px-3 py-2 ${OVERLAY_CARD}`}>

@@ -55,6 +55,7 @@ def list_attempts(
     event_id: list[str] | None = Query(None),
     ip: str | None = None,
     days: float = Query(0, ge=0, le=365),
+    sensor: str | None = Query(None, description="Restrict to a single sensor id"),
     db: DBSession = Depends(get_db),
 ):
     query = db.query(Attempt)
@@ -63,6 +64,8 @@ def list_attempts(
         query = query.filter(
             Attempt.timestamp >= datetime.utcnow() - timedelta(days=days)
         )
+    if sensor:
+        query = query.filter(Attempt.sensor_id == sensor)
     if country:
         query = query.filter(Attempt.country_code.in_(country))
     if intent:

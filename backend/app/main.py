@@ -10,10 +10,16 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.config import DATA_DIR, settings
-from app.database import engine, Base
+from app.database import engine, Base, SessionLocal
+from app.migrations import run_migrations
 from app.rate_limit import limiter
-from app.routers import attempts, stats, geo, malware, stream, admin, viewers, ips, profile, search, replay, meta, export
+from app.routers import (
+    attempts, stats, geo, malware, stream, admin, viewers, ips, profile,
+    search, replay, meta, export, ingest, sensors, campaigns,
+)
 from app.services.log_ingestion import tail_cowrie_log
+from app.services.sensor_health import sensor_health_worker
+from app.services.sensor_registry import ensure_local_sensor
 from app.services.ip_lookup import auto_lookup_ips
 from app.services.abuse_reporter import auto_report_ips
 from app.services.retention import retention_worker
@@ -44,6 +50,17 @@ def _acquire_background_lock():
 async def lifespan(app: FastAPI):
     settings.validate_startup()
     Base.metadata.create_all(bind=engine)
+    # Adds columns to tables that already exist; create_all never alters.
+    run_migrations(engine, settings.sensor_id)
+
+    # Register this hub's own sensor so the fleet view and per-sensor filters
+    # always have it, even before any remote sensor is provisioned.
+    db = SessionLocal()
+    try:
+        ensure_local_sensor(db)
+    finally:
+        db.close()
+
     background_lock = _acquire_background_lock()
     background_tasks: list[asyncio.Task] = []
 
@@ -70,6 +87,10 @@ async def lifespan(app: FastAPI):
         retention_task = asyncio.create_task(retention_worker())
         background_tasks.append(retention_task)
         logger.info("Retention worker started")
+
+        sensor_health_task = asyncio.create_task(sensor_health_worker())
+        background_tasks.append(sensor_health_task)
+        logger.info("Sensor health worker started")
 
     yield
 
@@ -101,7 +122,7 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type", "X-Admin-Key"],
+    allow_headers=["Content-Type", "X-Admin-Key", "X-Sensor-Key"],
 )
 
 app.include_router(attempts.router, prefix="/api/attempts", tags=["Attempts"])
@@ -117,6 +138,9 @@ app.include_router(search.router, prefix="/api/search", tags=["Search"])
 app.include_router(replay.router, prefix="/api/replay", tags=["Session Replay"])
 app.include_router(meta.router, prefix="/api/meta", tags=["Metadata"])
 app.include_router(export.router, prefix="/api/export", tags=["IOC Export"])
+app.include_router(sensors.router, prefix="/api/sensors", tags=["Sensors"])
+app.include_router(campaigns.router, prefix="/api/campaigns", tags=["Campaigns"])
+app.include_router(ingest.router, prefix="/api/ingest", tags=["Ingestion"])
 
 
 @app.get("/api/health")

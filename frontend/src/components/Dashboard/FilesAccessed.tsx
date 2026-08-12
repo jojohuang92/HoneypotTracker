@@ -2,13 +2,21 @@ import { Link } from "react-router-dom";
 import { FolderOpen } from "lucide-react";
 import { useAttempts } from "../../hooks/useAttempts";
 import { useTimeRange } from "../../context/TimeRangeContext";
+import { useSensorScope } from "../../context/SensorContext";
 import { formatTimestamp, formatNumber } from "../../utils/formatters";
 import Skeleton from "../common/Skeleton";
 import EmptyState from "../common/EmptyState";
 
 export default function FilesAccessed() {
   const { range } = useTimeRange();
-  const { data, loading } = useAttempts(1, 100, { intents: ["malware_deployment"] }, range.days);
+  const { sensorId } = useSensorScope();
+  const { data, loading } = useAttempts(
+    1,
+    100,
+    { intents: ["malware_deployment"] },
+    range.days,
+    sensorId,
+  );
 
   if (loading && data.items.length === 0) return <Skeleton rows={10} />;
 

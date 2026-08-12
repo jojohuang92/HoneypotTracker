@@ -7,6 +7,7 @@ from sqlalchemy import func, desc
 from app.database import get_db
 from app.models import Attempt, Session, CapturedFile, IPScore
 from app.rate_limit import limiter
+from app.services.threat_score import score_ip
 from app.schemas import (
     AttackerProfile, IntentBreakdown, CommandRank,
     CredentialPair, SessionSummary, TimelineBucket,
@@ -132,7 +133,22 @@ def get_attacker_profile(request: Request, ip: str, db: DBSession = Depends(get_
     # Abuse score
     score_row = db.query(IPScore).filter(IPScore.ip == ip).first()
 
+    # Which sensors observed this IP — the breadth signal behind its score.
+    sensors_seen = [
+        r[0]
+        for r in db.query(Attempt.sensor_id)
+        .filter(Attempt.src_ip == ip, Attempt.sensor_id.isnot(None))
+        .distinct()
+        .all()
+    ]
+    threat = score_ip(db, ip)
+
     return AttackerProfile(
+        threat_score=threat.total,
+        threat_level=threat.level,
+        threat_components=threat.components,
+        threat_reasons=threat.reasons,
+        sensors_seen=sorted(sensors_seen),
         src_ip=ip,
         country_code=latest.country_code if latest else None,
         country_name=latest.country_name if latest else None,

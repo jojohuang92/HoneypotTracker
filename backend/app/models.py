@@ -6,10 +6,55 @@ from sqlalchemy.sql import func
 from app.database import Base
 
 
+class Sensor(Base):
+    """A honeypot sensor reporting into this hub.
+
+    The hub always has one local sensor (its own Cowrie log); remote sensors
+    push events to /api/ingest authenticated by a per-sensor token. Only the
+    token's SHA-256 is stored, so the plaintext exists once, at creation.
+    """
+
+    __tablename__ = "sensors"
+
+    sensor_id = Column(String, primary_key=True)
+    label = Column(String, nullable=False)
+    is_local = Column(Boolean, default=False, nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False)
+    token_hash = Column(String)  # sha256 hex; NULL for the local sensor
+
+    # Published location. Coordinates are rounded on output according to
+    # location_precision, so a residential sensor never discloses more than
+    # intended (see services/sensor_registry.publish_coords).
+    country_code = Column(String)
+    country_name = Column(String)
+    city = Column(String)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    location_precision = Column(String, default="country", nullable=False)  # country|city|exact
+    timezone = Column(String)  # IANA name, for local-hour analysis
+
+    protocols = Column(String)  # comma-separated, e.g. "ssh,telnet"
+
+    # Liveness / agent telemetry, updated by ingest and heartbeat
+    last_event_at = Column(DateTime)
+    last_heartbeat_at = Column(DateTime)
+    agent_version = Column(String)
+    disk_free_bytes = Column(Integer)
+    disk_total_bytes = Column(Integer)
+
+    # Replay protection for pushed batches: the agent's state generation and
+    # the highest sequence number accepted from it.
+    last_epoch = Column(String)
+    last_seq = Column(Integer, default=0)
+
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class Attempt(Base):
     __tablename__ = "attempts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    sensor_id = Column(String, index=True)
     session_id = Column(String, nullable=False, index=True)
     event_id = Column(String, nullable=False, index=True)
     timestamp = Column(DateTime, nullable=False, index=True)
@@ -45,7 +90,10 @@ class CapturedFile(Base):
     __tablename__ = "captured_files"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    attempt_id = Column(Integer, ForeignKey("attempts.id"))
+    # Indexed: joined from attempts when scoring an IP's malware activity.
+    # Without it SQLite scans every captured file per matching attempt.
+    attempt_id = Column(Integer, ForeignKey("attempts.id"), index=True)
+    sensor_id = Column(String, index=True)
     session_id = Column(String, nullable=False, index=True)
     timestamp = Column(DateTime, nullable=False)
     filename = Column(String)
@@ -72,6 +120,7 @@ class Session(Base):
     __tablename__ = "sessions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    sensor_id = Column(String, index=True)
     session_id = Column(String, unique=True, nullable=False)
     src_ip = Column(String, nullable=False, index=True)
     start_time = Column(DateTime, nullable=False, index=True)

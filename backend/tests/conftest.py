@@ -6,8 +6,13 @@ import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session as SASession
 
+from app.config import settings
 from app.database import Base, get_db
-from app.models import Attempt, CapturedFile, Session, IPScore, PageView
+from app.models import Attempt, CapturedFile, Sensor, Session, IPScore, PageView
+
+# Rows always carry a sensor id in production: new rows get it from config and
+# pre-multi-sensor rows are backfilled by the migration.
+LOCAL_SENSOR = settings.sensor_id
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +69,10 @@ def client(_shared_connection):
     """Create a TestClient that shares the same DB connection as db_session."""
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from app.routers import attempts, stats, geo, malware, admin, viewers, ips, profile, search, replay, meta, export
+    from app.routers import (
+        attempts, stats, geo, malware, admin, viewers, ips, profile, search,
+        replay, meta, export, ingest, sensors, campaigns,
+    )
 
     TestSession = sessionmaker(bind=_shared_connection)
 
@@ -93,6 +101,9 @@ def client(_shared_connection):
     app.include_router(replay.router, prefix="/api/replay")
     app.include_router(meta.router, prefix="/api/meta")
     app.include_router(export.router, prefix="/api/export")
+    app.include_router(sensors.router, prefix="/api/sensors")
+    app.include_router(campaigns.router, prefix="/api/campaigns")
+    app.include_router(ingest.router, prefix="/api/ingest")
 
     return TestClient(app)
 
@@ -107,6 +118,7 @@ NOW = datetime(2025, 6, 15, 12, 0, 0)
 def make_attempt(db_session, **overrides) -> Attempt:
     """Insert an Attempt with sensible defaults. Override any field via kwargs."""
     defaults = dict(
+        sensor_id=LOCAL_SENSOR,
         session_id="sess-001",
         event_id="cowrie.login.failed",
         timestamp=NOW,
@@ -134,6 +146,7 @@ def make_attempt(db_session, **overrides) -> Attempt:
 
 def make_session(db_session, **overrides) -> Session:
     defaults = dict(
+        sensor_id=LOCAL_SENSOR,
         session_id="sess-001",
         src_ip="1.2.3.4",
         start_time=NOW,
@@ -151,6 +164,7 @@ def make_session(db_session, **overrides) -> Session:
 
 def make_captured_file(db_session, **overrides) -> CapturedFile:
     defaults = dict(
+        sensor_id=LOCAL_SENSOR,
         session_id="sess-001",
         timestamp=NOW,
         filename="malware.sh",
@@ -195,3 +209,26 @@ def seed_attempts(db_session, count=5, **overrides) -> list[Attempt]:
         )
         attempts.append(a)
     return attempts
+
+
+def make_sensor(db_session, **overrides) -> Sensor:
+    defaults = dict(
+        sensor_id="remote-1",
+        label="Remote Sensor",
+        is_local=False,
+        enabled=True,
+        country_code="TW",
+        country_name="Taiwan",
+        latitude=23.9739,
+        longitude=120.9820,
+        location_precision="country",
+        timezone="Asia/Taipei",
+        protocols="ssh,telnet",
+        created_at=NOW,
+    )
+    defaults.update(overrides)
+    sensor = Sensor(**defaults)
+    db_session.add(sensor)
+    db_session.commit()
+    db_session.refresh(sensor)
+    return sensor

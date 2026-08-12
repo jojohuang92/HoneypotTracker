@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { Globe } from "lucide-react";
 import { useCountryRanks } from "../../hooks/useAttempts";
 import { useTimeRange } from "../../context/TimeRangeContext";
+import { useSensorScope } from "../../context/SensorContext";
 import { formatNumber } from "../../utils/formatters";
 import CountryBarChart from "../Charts/BarChart";
 import Skeleton from "../common/Skeleton";
@@ -9,7 +10,8 @@ import EmptyState from "../common/EmptyState";
 
 export default function CountryRankings() {
   const { range } = useTimeRange();
-  const { data, loading } = useCountryRanks(range.days);
+  const { sensorId } = useSensorScope();
+  const { data, loading } = useCountryRanks(range.days, sensorId);
   const navigate = useNavigate();
 
   if (loading && data.length === 0) return <Skeleton rows={10} />;

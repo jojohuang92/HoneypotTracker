@@ -382,7 +382,7 @@ class TestIncrementSessionField:
                        start_time=datetime(2025, 6, 15), protocol="ssh",
                        login_attempts=3))
         db.commit()
-        _increment_session_field(db, "s1", "login_attempts")
+        _increment_session_field(db, "s1", "login_attempts", "local")
         db.commit()
 
         sess = db.query(Session).filter_by(session_id="s1").first()
@@ -390,7 +390,7 @@ class TestIncrementSessionField:
 
     def test_no_session_is_noop(self, db):
         # Should not raise
-        _increment_session_field(db, "nonexistent", "login_attempts")
+        _increment_session_field(db, "nonexistent", "login_attempts", "local")
 
 
 # ---------------------------------------------------------------------------

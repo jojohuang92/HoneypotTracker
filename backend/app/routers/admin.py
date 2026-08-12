@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session as DBSession
 
 from app.config import settings
 from app.database import get_db
-from app.models import Attempt, CapturedFile, Session
+from app.models import Attempt, CapturedFile, Sensor, Session
+from app.schemas import SensorCreate, SensorCreated
+from app.services import sensor_registry
 
 router = APIRouter()
 audit_logger = logging.getLogger("audit")
@@ -98,3 +100,83 @@ def delete_private_ips(
     }
     _audit_log("delete_private_ips", _key, result)
     return result
+
+
+@router.post("/sensors", response_model=SensorCreated, status_code=201)
+def create_sensor(
+    payload: SensorCreate,
+    _key: str = Depends(_require_admin_key),
+    db: DBSession = Depends(get_db),
+):
+    """Register a remote sensor and mint its ingest token.
+
+    The token is returned once and stored only as a SHA-256 hash — there is no
+    way to recover it later, only to re-issue.
+    """
+    if db.query(Sensor).filter_by(sensor_id=payload.sensor_id).first():
+        raise HTTPException(status_code=409, detail="Sensor already exists")
+    if payload.location_precision not in sensor_registry.PRECISIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"location_precision must be one of {sensor_registry.PRECISIONS}",
+        )
+
+    token = sensor_registry.generate_token()
+    sensor = Sensor(
+        sensor_id=payload.sensor_id,
+        label=payload.label,
+        is_local=False,
+        enabled=True,
+        token_hash=sensor_registry.hash_token(token),
+        country_code=payload.country_code,
+        country_name=payload.country_name,
+        city=payload.city,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        location_precision=payload.location_precision,
+        timezone=payload.timezone,
+        protocols=payload.protocols,
+    )
+    db.add(sensor)
+    db.commit()
+
+    _audit_log("create_sensor", _key, {"sensor_id": payload.sensor_id})
+    return SensorCreated(sensor_id=sensor.sensor_id, label=sensor.label, token=token)
+
+
+@router.post("/sensors/{sensor_id}/rotate", response_model=SensorCreated)
+def rotate_sensor_token(
+    sensor_id: str,
+    _key: str = Depends(_require_admin_key),
+    db: DBSession = Depends(get_db),
+):
+    """Issue a new ingest token, immediately invalidating the previous one."""
+    sensor = db.query(Sensor).filter_by(sensor_id=sensor_id).first()
+    if not sensor or sensor.is_local:
+        raise HTTPException(status_code=404, detail="Remote sensor not found")
+
+    token = sensor_registry.generate_token()
+    sensor.token_hash = sensor_registry.hash_token(token)
+    db.commit()
+
+    _audit_log("rotate_sensor_token", _key, {"sensor_id": sensor_id})
+    return SensorCreated(sensor_id=sensor.sensor_id, label=sensor.label, token=token)
+
+
+@router.delete("/sensors/{sensor_id}")
+def disable_sensor(
+    sensor_id: str,
+    _key: str = Depends(_require_admin_key),
+    db: DBSession = Depends(get_db),
+):
+    """Revoke a sensor's access, keeping the events it already reported."""
+    sensor = db.query(Sensor).filter_by(sensor_id=sensor_id).first()
+    if not sensor or sensor.is_local:
+        raise HTTPException(status_code=404, detail="Remote sensor not found")
+
+    sensor.enabled = False
+    sensor.token_hash = None
+    db.commit()
+
+    _audit_log("disable_sensor", _key, {"sensor_id": sensor_id})
+    return {"sensor_id": sensor_id, "enabled": False}

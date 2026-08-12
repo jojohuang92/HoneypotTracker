@@ -4,6 +4,7 @@ import { ListFilter, Inbox } from "lucide-react";
 import { useAttempts, useFilterOptions } from "../../hooks/useAttempts";
 import type { AttemptFilters } from "../../hooks/useAttempts";
 import { useTimeRange } from "../../context/TimeRangeContext";
+import { useSensorScope } from "../../context/SensorContext";
 import { formatTimestamp, intentLabel, intentColor } from "../../utils/formatters";
 import type { Attempt } from "../../types";
 import AttemptDetail from "./AttemptDetail";
@@ -27,6 +28,7 @@ export default function AllAttemptsTable() {
   const [selected, setSelected] = useState<Attempt | null>(null);
   const [showFilter, setShowFilter] = useState(false);
   const { range } = useTimeRange();
+  const { sensorId } = useSensorScope();
   const { data: filterOptions } = useFilterOptions();
 
   const filters = useMemo(() => filtersFromParams(searchParams), [searchParams]);
@@ -40,7 +42,7 @@ export default function AllAttemptsTable() {
     setPage(1);
   };
 
-  const { data, loading } = useAttempts(page, 50, filters, range.days);
+  const { data, loading } = useAttempts(page, 50, filters, range.days, sensorId);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const activeFilterCount =

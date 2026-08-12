@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import type { LiveAttackEvent } from "../../types";
 import { TIME_RANGES, useTimeRange } from "../../context/TimeRangeContext";
+import { useSensorScope } from "../../context/SensorContext";
 
 import OverviewPanel from "./OverviewPanel";
 import AllAttemptsTable from "./AllAttemptsTable";
@@ -13,10 +14,16 @@ import MalwarePanel from "./MalwarePanel";
 import IPAddresses from "./IPAddresses";
 import SearchPanel from "./SearchPanel";
 import AttackerProfilePanel from "./AttackerProfilePanel";
+import FleetPanel from "./FleetPanel";
+import CampaignsPanel from "./CampaignsPanel";
+import CredentialsPanel from "./CredentialsPanel";
 import SessionReplayPanel from "./SessionReplayPanel";
 import LiveClock from "../common/LiveClock";
 
 const SECTION_TITLES: [string, string][] = [
+  ["/fleet", "Sensor Fleet"],
+  ["/campaigns", "Campaigns"],
+  ["/credentials", "Credentials"],
   ["/attempts", "Attempts"],
   ["/commands", "Commands"],
   ["/files", "Files Accessed"],
@@ -49,7 +56,10 @@ function ReplayRoute() {
 
 // The time-range selector scopes aggregate views; detail views
 // (profile, replay, search) always show everything for their subject.
-const RANGED_PATHS = ["/", "/attempts", "/commands", "/files", "/intents", "/mitre", "/countries"];
+const RANGED_PATHS = [
+  "/", "/attempts", "/commands", "/files", "/intents", "/mitre", "/countries",
+  "/credentials",
+];
 
 interface DashboardPanelProps {
   lastEvent: LiveAttackEvent | null;
@@ -57,6 +67,7 @@ interface DashboardPanelProps {
 
 export default function DashboardPanel({ lastEvent }: DashboardPanelProps) {
   const { range, setRange } = useTimeRange();
+  const { sensorId, setSensorId, sensors, isFleet } = useSensorScope();
   const { pathname } = useLocation();
   const showRange =
     pathname === "/" || RANGED_PATHS.some((p) => p !== "/" && pathname.startsWith(p));
@@ -69,6 +80,22 @@ export default function DashboardPanel({ lastEvent }: DashboardPanelProps) {
           {sectionTitle(pathname)}
         </h1>
         <div className="flex items-center gap-3 shrink-0">
+          {/* Only worth showing once a second sensor exists. */}
+          {isFleet && (
+            <select
+              value={sensorId ?? ""}
+              onChange={(e) => setSensorId(e.target.value || null)}
+              aria-label="Sensor scope"
+              className="text-xs bg-gray-800 border border-gray-700 rounded-md px-2 py-1 text-gray-300 focus:outline-none focus:border-blue-500 max-w-[9rem]"
+            >
+              <option value="">All sensors</option>
+              {sensors.map((s) => (
+                <option key={s.sensor_id} value={s.sensor_id}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          )}
           {showRange && (
             <div
               className="flex gap-0.5 bg-gray-800/60 rounded-md p-0.5"
@@ -108,6 +135,9 @@ export default function DashboardPanel({ lastEvent }: DashboardPanelProps) {
           <Route path="/ips" element={<IPAddresses />} />
           <Route path="/countries" element={<CountryRankings />} />
           <Route path="/malware" element={<MalwarePanel />} />
+          <Route path="/fleet" element={<FleetPanel />} />
+          <Route path="/campaigns" element={<CampaignsPanel />} />
+          <Route path="/credentials" element={<CredentialsPanel />} />
           <Route path="/profile/:ip?" element={<ProfileRoute />} />
           <Route path="/replay/:sessionId" element={<ReplayRoute />} />
           <Route path="/search" element={<SearchPanel />} />

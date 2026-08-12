@@ -42,6 +42,30 @@ class Settings(BaseSettings):
     local_timezone: str = "America/Los_Angeles"
     enable_background_tasks: bool = True
 
+    # ── This hub's own sensor ────────────────────────────────────────────
+    # Identity of the locally-tailed Cowrie instance. Events ingested from
+    # the local log — and every row that predates multi-sensor support — are
+    # attributed to this id, so changing it after deployment orphans history.
+    sensor_id: str = "local"
+    sensor_label: str = ""  # defaults to honeypot_label
+    sensor_country_code: str = ""
+    sensor_city: str = ""
+    # Published position of this sensor. Left unset, it gets no map marker.
+    sensor_latitude: float | None = None
+    sensor_longitude: float | None = None
+    sensor_protocols: str = "ssh"
+    # exact | city | country — how precisely this sensor's own position is
+    # published. Remote sensors carry their own setting in the DB.
+    sensor_location_precision: str = "exact"
+
+    # ── Remote sensor ingestion ──────────────────────────────────────────
+    ingest_max_events: int = 500      # events per batch
+    ingest_max_bytes: int = 2_000_000  # request body cap
+    # A sensor is considered offline once its agent stops heartbeating.
+    sensor_offline_after_minutes: int = 15
+    # Alert when an agent reports less free disk than this.
+    sensor_min_disk_free_mb: int = 1024
+
     # Days of raw data (attempts, sessions, page views) to keep. 0 = keep
     # forever. Daily aggregates are always written and never pruned.
     retention_days: int = 0

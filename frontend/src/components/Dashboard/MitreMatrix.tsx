@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { LayoutGrid } from "lucide-react";
 import { useMitreMatrix } from "../../hooks/useAttempts";
 import { useTimeRange } from "../../context/TimeRangeContext";
+import { useSensorScope } from "../../context/SensorContext";
 import type { MitreTechnique } from "../../types";
 import Skeleton from "../common/Skeleton";
 import EmptyState from "../common/EmptyState";
@@ -59,7 +60,8 @@ function TechniqueCell({ t, max }: { t: MitreTechnique; max: number }) {
 
 export default function MitreMatrix() {
   const { range } = useTimeRange();
-  const { data, loading } = useMitreMatrix(range.days);
+  const { sensorId } = useSensorScope();
+  const { data, loading } = useMitreMatrix(range.days, sensorId);
 
   const maxTechniqueCount = useMemo(() => {
     let max = 0;

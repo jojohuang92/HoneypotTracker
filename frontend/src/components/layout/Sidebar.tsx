@@ -2,6 +2,8 @@ import { NavLink } from "react-router-dom";
 import {
   Activity,
   List,
+  ServerCog,
+  KeyRound,
   Terminal,
   FolderOpen,
   Crosshair,
@@ -28,10 +30,15 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
     items: [{ to: "/", label: "Overview", icon: Activity, end: true }],
   },
   {
+    label: "Fleet",
+    items: [{ to: "/fleet", label: "Sensors", icon: ServerCog }],
+  },
+  {
     label: "Analyze",
     items: [
       { to: "/attempts", label: "Attempts", icon: List },
       { to: "/commands", label: "Commands", icon: Terminal },
+      { to: "/credentials", label: "Credentials", icon: KeyRound },
       { to: "/files", label: "Files", icon: FolderOpen },
       { to: "/intents", label: "Intents", icon: Crosshair },
       { to: "/mitre", label: "MITRE", icon: LayoutGrid },
@@ -42,6 +49,7 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       { to: "/ips", label: "IPs", icon: Network },
       { to: "/countries", label: "Countries", icon: Globe },
+      { to: "/campaigns", label: "Campaigns", icon: Network },
       { to: "/malware", label: "Malware", icon: Bug },
       { to: "/profile", label: "Profile", icon: UserSearch },
     ],

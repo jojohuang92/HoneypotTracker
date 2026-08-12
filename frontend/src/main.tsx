@@ -4,12 +4,15 @@ import { BrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
 import { TimeRangeProvider } from './context/TimeRangeContext.tsx'
+import { SensorProvider } from './context/SensorContext.tsx'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <TimeRangeProvider>
-        <App />
+        <SensorProvider>
+          <App />
+        </SensorProvider>
       </TimeRangeProvider>
     </BrowserRouter>
   </StrictMode>,

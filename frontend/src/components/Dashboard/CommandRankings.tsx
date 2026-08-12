@@ -2,13 +2,15 @@ import { useNavigate } from "react-router-dom";
 import { Terminal } from "lucide-react";
 import { useCommandRanks } from "../../hooks/useAttempts";
 import { useTimeRange } from "../../context/TimeRangeContext";
+import { useSensorScope } from "../../context/SensorContext";
 import { intentLabel, intentColor, formatNumber } from "../../utils/formatters";
 import Skeleton from "../common/Skeleton";
 import EmptyState from "../common/EmptyState";
 
 export default function CommandRankings() {
   const { range } = useTimeRange();
-  const { data, loading } = useCommandRanks(range.days);
+  const { sensorId } = useSensorScope();
+  const { data, loading } = useCommandRanks(range.days, sensorId);
   const navigate = useNavigate();
 
   if (loading && data.length === 0) return <Skeleton rows={10} />;

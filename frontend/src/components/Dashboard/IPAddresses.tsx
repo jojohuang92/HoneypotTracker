@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Network } from "lucide-react";
 import { useUniqueIPs } from "../../hooks/useAttempts";
+import { useSensorScope } from "../../context/SensorContext";
 import { formatTimestamp } from "../../utils/formatters";
 import { fetchJSON } from "../../utils/api";
 import type { UniqueIP } from "../../types";
@@ -25,7 +26,16 @@ function scoreBg(score: number | null): string {
 }
 
 type ScoreFilter = "all" | "critical" | "high" | "medium" | "low" | "unknown";
-type AttackSort = "most" | "least";
+type AttackSort = "most" | "least" | "threat";
+
+/** Colour by composite threat level rather than raw counts. */
+function threatColor(level: string | null): string {
+  if (level === "critical") return "text-red-400";
+  if (level === "high") return "text-orange-400";
+  if (level === "medium") return "text-yellow-400";
+  if (level === "low") return "text-green-400";
+  return "text-gray-500";
+}
 
 const SCORE_FILTERS: { value: ScoreFilter; label: string; color: string }[] = [
   { value: "all", label: "All", color: "text-gray-300" },
@@ -47,10 +57,12 @@ function matchesScoreFilter(score: number | null, filter: ScoreFilter): boolean 
 }
 
 export default function IPAddresses() {
-  const { data, loading, refresh } = useUniqueIPs();
+  const { sensorId } = useSensorScope();
+  // Scored ranking is the point of this table, so request it up front.
+  const { data, loading, refresh } = useUniqueIPs(sensorId, true);
   const [lookingUp, setLookingUp] = useState<Set<string>>(new Set());
   const [scoreFilter, setScoreFilter] = useState<ScoreFilter>("all");
-  const [attackSort, setAttackSort] = useState<AttackSort>("most");
+  const [attackSort, setAttackSort] = useState<AttackSort>("threat");
 
   const lookupScore = async (ip: string) => {
     setLookingUp((prev) => new Set(prev).add(ip));
@@ -89,7 +101,12 @@ export default function IPAddresses() {
 
   const filtered = data
     .filter((d) => matchesScoreFilter(d.abuse_score, scoreFilter))
-    .sort((a, b) => attackSort === "most" ? b.count - a.count : a.count - b.count);
+    .sort((a, b) => {
+      if (attackSort === "threat") {
+        return (b.threat_score ?? -1) - (a.threat_score ?? -1);
+      }
+      return attackSort === "most" ? b.count - a.count : a.count - b.count;
+    });
   const missingCount = data.filter((d) => d.abuse_score === null).length;
 
   return (
@@ -113,6 +130,7 @@ export default function IPAddresses() {
             onChange={(e) => setAttackSort(e.target.value as AttackSort)}
             className="text-xs bg-gray-800 border border-gray-600 rounded px-2 py-1 text-gray-300 focus:outline-none focus:border-blue-500"
           >
+            <option value="threat">Highest Threat</option>
             <option value="most">Most Attacks</option>
             <option value="least">Least Attacks</option>
           </select>
@@ -134,6 +152,7 @@ export default function IPAddresses() {
             <tr className="border-b border-gray-700">
               <th className="text-left p-2 text-gray-400 font-medium">IP Address</th>
               <th className="text-left p-2 text-gray-400 font-medium">Location</th>
+              <th className="text-right p-2 text-gray-400 font-medium">Threat</th>
               <th className="text-right p-2 text-gray-400 font-medium">Attacks</th>
               <th className="text-right p-2 text-gray-400 font-medium">Abuse Score</th>
               <th className="text-right p-2 text-gray-400 font-medium">Reports</th>
@@ -159,6 +178,26 @@ export default function IPAddresses() {
                   </div>
                   {ip.city && (
                     <div className="text-[10px] text-gray-500">{ip.country_code}</div>
+                  )}
+                </td>
+                <td className="p-2 text-right">
+                  {ip.threat_score != null ? (
+                    <span
+                      className={`font-bold ${threatColor(ip.threat_level)}`}
+                      title={`Composite risk ${ip.threat_score}/100 (${ip.threat_level})`}
+                    >
+                      {ip.threat_score}
+                    </span>
+                  ) : (
+                    <span className="text-gray-600">—</span>
+                  )}
+                  {ip.sensor_count > 1 && (
+                    <span
+                      className="ml-1 text-[9px] text-amber-400"
+                      title={`Seen by ${ip.sensor_count} sensors`}
+                    >
+                      ×{ip.sensor_count}
+                    </span>
                   )}
                 </td>
                 <td className="p-2 text-right font-mono text-orange-400">

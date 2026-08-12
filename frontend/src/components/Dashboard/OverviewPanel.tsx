@@ -8,6 +8,7 @@ import Skeleton from "../common/Skeleton";
 import type { LiveAttackEvent, TimelineBucket } from "../../types";
 import { useOverview, useTimeline, useCredentials } from "../../hooks/useAttempts";
 import { useTimeRange } from "../../context/TimeRangeContext";
+import { useSensorScope } from "../../context/SensorContext";
 
 function getCurrentBucketKey(granularity: string): string {
   const now = new Date();
@@ -27,12 +28,13 @@ interface OverviewPanelProps {
 
 export default function OverviewPanel({ lastEvent }: OverviewPanelProps) {
   const { range } = useTimeRange();
-  const { data: stats } = useOverview(range.days);
+  const { sensorId } = useSensorScope();
+  const { data: stats } = useOverview(range.days, sensorId);
 
   // The timeline endpoint always needs a window; "All" shows the last 30 days.
   const timelineDays = range.days || 30;
   const granularity = timelineDays <= 1 ? "hour" : "day";
-  const { data: timeline } = useTimeline(granularity, timelineDays);
+  const { data: timeline } = useTimeline(granularity, timelineDays, sensorId);
 
   const [liveTimeline, setLiveTimeline] = useState<TimelineBucket[]>([]);
 
@@ -54,7 +56,7 @@ export default function OverviewPanel({ lastEvent }: OverviewPanelProps) {
     });
   }, [lastEvent, granularity]);
 
-  const { data: creds, loading: credsLoading } = useCredentials(range.days);
+  const { data: creds, loading: credsLoading } = useCredentials(range.days, sensorId);
 
   const delta =
     stats.prev_attempts != null
