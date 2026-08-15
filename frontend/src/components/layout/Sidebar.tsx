@@ -14,6 +14,7 @@ import {
   UserSearch,
   Search,
   ShieldAlert,
+  CircleUser,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -24,7 +25,8 @@ interface NavItem {
   end?: boolean;
 }
 
-const GROUPS: { label: string; items: NavItem[] }[] = [
+/** `footer` groups sink to the bottom of the desktop rail. */
+const GROUPS: { label: string; items: NavItem[]; footer?: boolean }[] = [
   {
     label: "Live",
     items: [{ to: "/", label: "Overview", icon: Activity, end: true }],
@@ -58,6 +60,11 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
     label: "Search",
     items: [{ to: "/search", label: "Search", icon: Search }],
   },
+  {
+    label: "About",
+    items: [{ to: "/about", label: "About", icon: CircleUser }],
+    footer: true,
+  },
 ];
 
 function linkClasses(isActive: boolean) {
@@ -83,7 +90,14 @@ export default function Sidebar() {
       {/* Desktop: grouped vertical nav. Mobile: single horizontal strip. */}
       <div className="flex overflow-x-auto gap-1 p-2 lg:flex-col lg:overflow-x-visible lg:gap-0 lg:p-0 lg:px-2 lg:pb-3 lg:flex-1">
         {GROUPS.map((group) => (
-          <div key={group.label} className="flex gap-1 lg:block lg:mt-3 lg:first:mt-0">
+          <div
+            key={group.label}
+            className={`flex gap-1 lg:block lg:mt-3 lg:first:mt-0 ${
+              group.footer
+                ? "lg:mt-auto lg:pt-3 lg:border-t lg:border-gray-800"
+                : ""
+            }`}
+          >
             <div className="hidden lg:block px-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-600">
               {group.label}
             </div>

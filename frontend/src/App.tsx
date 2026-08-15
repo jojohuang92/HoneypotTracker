@@ -1,9 +1,11 @@
+import { Routes, Route } from "react-router-dom";
 import { useOverview, useGeoPins } from "./hooks/useAttempts";
 import { useSensorScope } from "./context/SensorContext";
 import { useSSE } from "./hooks/useSSE";
 import AttackMap from "./components/Map/AttackMap";
 import { threatLegend } from "./components/Map/threatScale";
 import DashboardPanel from "./components/Dashboard/DashboardPanel";
+import AboutPage from "./components/About/AboutPage";
 import Sidebar from "./components/layout/Sidebar";
 import LiveIndicator from "./components/common/LiveIndicator";
 import { useRef, useState, useEffect, useCallback } from "react";
@@ -17,7 +19,7 @@ const MIN_DASH_WIDTH = 320;
 const MAX_DASH_WIDTH = 900;
 const DEFAULT_DASH_WIDTH = 480;
 
-function App() {
+function DashboardLayout() {
   // All-time headline numbers for the map overlay, independent of the
   // panel's time-range selector.
   const { sensorId, sensors } = useSensorScope();
@@ -25,11 +27,6 @@ function App() {
   const { data: pins } = useGeoPins(sensorId);
 
   const { isConnected, lastEvent } = useSSE("/api/stream/live");
-
-  // Record this page view once on mount
-  useEffect(() => {
-    fetch("/api/stats/view", { method: "POST" }).catch(() => {});
-  }, []);
 
   const [dashWidth, setDashWidth] = useState(DEFAULT_DASH_WIDTH);
   const dragging = useRef(false);
@@ -76,9 +73,7 @@ function App() {
   }, []);
 
   return (
-    <div className="h-dvh w-screen flex flex-col lg:flex-row overflow-hidden">
-      <Sidebar />
-
+    <>
       {/* Map */}
       <div ref={mapWrapRef} className="relative min-w-0 h-[38dvh] shrink-0 lg:h-auto lg:flex-1">
         <AttackMap
@@ -150,6 +145,25 @@ function App() {
       >
         <DashboardPanel lastEvent={lastEvent} />
       </div>
+    </>
+  );
+}
+
+function App() {
+  // Record this page view once on mount
+  useEffect(() => {
+    fetch("/api/stats/view", { method: "POST" }).catch(() => {});
+  }, []);
+
+  // /about is the one route that owns the whole viewport: long-form text needs
+  // the width, and it has no use for the live map or the SSE feed behind it.
+  return (
+    <div className="h-dvh w-screen flex flex-col lg:flex-row overflow-hidden">
+      <Sidebar />
+      <Routes>
+        <Route path="/about" element={<AboutPage />} />
+        <Route path="*" element={<DashboardLayout />} />
+      </Routes>
     </div>
   );
 }
