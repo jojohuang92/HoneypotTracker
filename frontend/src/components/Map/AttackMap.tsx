@@ -13,7 +13,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { GeoPin, LiveAttackEvent, Sensor } from "../../types";
 import { formatTimestamp, formatNumber } from "../../utils/formatters";
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { computeThreatScale, gradeFor, compactCount, type ThreatScale } from "./threatScale";
 
 function createPinIcon(count: number, scale: ThreatScale) {
@@ -78,6 +78,297 @@ function MapResizer({ width }: { width: number }) {
     map.invalidateSize();
   }, [width, map]);
   return null;
+}
+
+/** Beyond this many overlapping pins a spiderfy fan wraps into an unreadable
+ *  ring, so those clusters open a scrollable source list instead. */
+const SPIDERFY_LIMIT = 6;
+
+const PANEL_WIDTH = 268;
+const PANEL_HEIGHT = 316;
+
+/** The slice of Leaflet.markercluster's cluster API used here — the plugin
+ *  ships no type declarations of its own. */
+interface MarkerCluster extends L.Marker {
+  getBounds(): L.LatLngBounds;
+  getAllChildMarkers(): L.Marker[];
+  zoomToBounds(options?: L.FitBoundsOptions): void;
+  spiderfy(): void;
+}
+
+interface ClusterList {
+  pins: GeoPin[];
+  left: number;
+  top: number;
+}
+
+function positionKey(lat: number, lng: number) {
+  return `${lat},${lng}`;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), Math.max(min, max));
+}
+
+/** Header for the source list: the shared place name when every pin sits in
+ *  the same one, which is the usual case for a stack of overlapping pins. */
+function listHeading(pins: GeoPin[]) {
+  const [first] = pins;
+  const sameSpot = pins.every(
+    (pin) => pin.city === first.city && pin.country_code === first.country_code,
+  );
+  if (!sameSpot) return `${pins.length} locations`;
+  return [first.city, first.country_name ?? first.country_code].filter(Boolean).join(", ") ||
+    "Unknown location";
+}
+
+interface ClusterLayerProps {
+  pins: GeoPin[];
+  scale: ThreatScale;
+  onPinClick?: (pin: GeoPin) => void;
+}
+
+/** Attack pins, clustered. Clicking a cluster zooms in while that still
+ *  separates it; once the pins are stacked on one spot, a dense cluster opens
+ *  a list of its sources rather than fanning them around the map. */
+function ClusterLayer({ pins, scale, onPinClick }: ClusterLayerProps) {
+  const map = useMap();
+  const [list, setList] = useState<ClusterList | null>(null);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  /** Child markers only report coordinates, so index the pins by position to
+   *  recover the data behind a clicked cluster. */
+  const byPosition = useMemo(() => {
+    const index = new Map<string, GeoPin[]>();
+    for (const pin of pins) {
+      const key = positionKey(pin.latitude, pin.longitude);
+      const bucket = index.get(key);
+      if (bucket) bucket.push(pin);
+      else index.set(key, [pin]);
+    }
+    return index;
+  }, [pins]);
+
+  const close = useCallback(() => {
+    setList(null);
+    setExpanded(null);
+  }, []);
+
+  useEffect(() => {
+    map.on("movestart zoomstart click", close);
+    return () => {
+      map.off("movestart zoomstart click", close);
+    };
+  }, [map, close]);
+
+  useEffect(() => {
+    if (!list) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [list, close]);
+
+  // Clicks and wheel scrolls inside the panel must not pan or zoom the map.
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    L.DomEvent.disableClickPropagation(el);
+    L.DomEvent.disableScrollPropagation(el);
+  }, [list]);
+
+  const handleClusterClick = useCallback(
+    (event: L.LeafletMouseEvent) => {
+      const cluster = event.layer as MarkerCluster;
+      const bounds = cluster.getBounds();
+
+      // A cluster covering real ground still breaks apart by zooming, which
+      // stays the more useful answer.
+      if (
+        !bounds.getNorthEast().equals(bounds.getSouthWest()) &&
+        map.getZoom() < map.getMaxZoom()
+      ) {
+        cluster.zoomToBounds({ padding: [40, 40] });
+        return;
+      }
+
+      const children = cluster.getAllChildMarkers();
+      if (children.length <= SPIDERFY_LIMIT) {
+        cluster.spiderfy();
+        return;
+      }
+
+      const seen = new Set<string>();
+      const listed: GeoPin[] = [];
+      for (const marker of children) {
+        const { lat, lng } = marker.getLatLng();
+        const key = positionKey(lat, lng);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        listed.push(...(byPosition.get(key) ?? []));
+      }
+      if (listed.length === 0) return;
+      listed.sort((a, b) => b.count - a.count);
+
+      const size = map.getSize();
+      const point = map.latLngToContainerPoint(cluster.getLatLng());
+      setExpanded(null);
+      setList({
+        pins: listed,
+        left: clamp(point.x + 20, 8, size.x - PANEL_WIDTH - 8),
+        top: clamp(point.y - 16, 8, size.y - PANEL_HEIGHT - 8),
+      });
+    },
+    [map, byPosition],
+  );
+
+  return (
+    <>
+      <MarkerClusterGroup
+        chunkedLoading
+        maxClusterRadius={50}
+        spiderfyOnMaxZoom={false}
+        zoomToBoundsOnClick={false}
+        showCoverageOnHover={false}
+        iconCreateFunction={createClusterIcon}
+        onClick={handleClusterClick}
+      >
+        {pins.map((pin, i) => (
+          <Marker
+            key={`${pin.latitude}-${pin.longitude}-${i}`}
+            position={[pin.latitude, pin.longitude]}
+            icon={createPinIcon(pin.count, scale)}
+            eventHandlers={{
+              click: () => onPinClick?.(pin),
+            }}
+          >
+            <Tooltip direction="top" offset={[0, -8]} opacity={1}>
+              <span className="font-mono text-xs">
+                {[pin.city, pin.country_code].filter(Boolean).join(", ") || "Unknown"}
+                {" · "}
+                <strong>{formatNumber(pin.count)}</strong>
+              </span>
+            </Tooltip>
+            <Popup>
+              <div className="min-w-[220px] text-sm">
+                <div className="flex items-center justify-between gap-3 border-b border-gray-700/60 pb-2 mb-2">
+                  <span className="font-semibold text-gray-100">
+                    {[pin.city, pin.country_name].filter(Boolean).join(", ") || "Unknown location"}
+                  </span>
+                  {pin.country_code && (
+                    <span className="shrink-0 rounded border border-gray-600/60 bg-gray-800 px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-gray-300">
+                      {pin.country_code}
+                    </span>
+                  )}
+                </div>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
+                  <dt className="text-gray-500">Source IP</dt>
+                  <dd className="font-mono text-gray-200">{pin.latest_src_ip}</dd>
+                  <dt className="text-gray-500">Attacks</dt>
+                  <dd
+                    className="font-mono font-semibold tabular-nums"
+                    style={{ color: gradeFor(pin.count, scale).color }}
+                  >
+                    {formatNumber(pin.count)}
+                  </dd>
+                  <dt className="text-gray-500">Last seen</dt>
+                  <dd className="text-gray-300">
+                    {pin.latest_timestamp ? formatTimestamp(pin.latest_timestamp) : "—"}
+                  </dd>
+                  <dt className="text-gray-500">Last event</dt>
+                  <dd className="font-mono text-gray-300">
+                    {pin.latest_event_id?.replace("cowrie.", "") ?? "—"}
+                  </dd>
+                </dl>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
+      </MarkerClusterGroup>
+
+      {list && (
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-label="Attack sources in this cluster"
+          className="absolute z-[1200] flex flex-col overflow-hidden rounded-lg border border-gray-800 bg-gray-950/95 shadow-xl shadow-black/40 backdrop-blur-md"
+          style={{ left: list.left, top: list.top, width: PANEL_WIDTH, maxHeight: PANEL_HEIGHT }}
+        >
+          <div className="flex items-center justify-between gap-2 border-b border-gray-800 px-3 py-2">
+            <div className="min-w-0">
+              <div className="truncate text-xs font-semibold text-gray-100">
+                {listHeading(list.pins)}
+              </div>
+              <div className="text-[10px] uppercase tracking-wider text-gray-500">
+                {list.pins.length} sources
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={close}
+              aria-label="Close source list"
+              className="shrink-0 rounded px-1.5 py-0.5 text-gray-500 hover:bg-gray-800 hover:text-gray-200"
+            >
+              &#215;
+            </button>
+          </div>
+
+          <ul className="overflow-y-auto overscroll-contain">
+            {list.pins.map((pin, i) => {
+              const { color } = gradeFor(pin.count, scale);
+              const isOpen = expanded === i;
+              return (
+                <li key={`${pin.latest_src_ip}-${i}`} className="border-b border-gray-900 last:border-0">
+                  <button
+                    type="button"
+                    aria-expanded={isOpen}
+                    onClick={() => {
+                      setExpanded(isOpen ? null : i);
+                      onPinClick?.(pin);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-800/60"
+                  >
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full border border-white/40"
+                      style={{ background: color, boxShadow: `0 0 6px ${color}99` }}
+                    />
+                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-gray-200">
+                      {pin.latest_src_ip ?? "Unknown IP"}
+                    </span>
+                    <span
+                      className="font-mono text-[11px] font-semibold tabular-nums"
+                      style={{ color }}
+                    >
+                      {formatNumber(pin.count)}
+                    </span>
+                  </button>
+
+                  {isOpen && (
+                    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 bg-gray-900/50 px-3 pb-2 pt-1 text-[11px]">
+                      <dt className="text-gray-500">Location</dt>
+                      <dd className="truncate text-gray-300">
+                        {[pin.city, pin.country_name].filter(Boolean).join(", ") || "Unknown"}
+                      </dd>
+                      <dt className="text-gray-500">Last seen</dt>
+                      <dd className="text-gray-300">
+                        {pin.latest_timestamp ? formatTimestamp(pin.latest_timestamp) : "\u2014"}
+                      </dd>
+                      <dt className="text-gray-500">Last event</dt>
+                      <dd className="truncate font-mono text-gray-300">
+                        {pin.latest_event_id?.replace("cowrie.", "") ?? "\u2014"}
+                      </dd>
+                    </dl>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </>
+  );
 }
 
 interface AttackMapProps {
@@ -198,65 +489,7 @@ export default function AttackMap({
           </Marker>
         ))}
 
-      <MarkerClusterGroup
-        chunkedLoading
-        maxClusterRadius={50}
-        spiderfyOnMaxZoom
-        showCoverageOnHover={false}
-        iconCreateFunction={createClusterIcon}
-      >
-        {pins.map((pin, i) => (
-          <Marker
-            key={`${pin.latitude}-${pin.longitude}-${i}`}
-            position={[pin.latitude, pin.longitude]}
-            icon={createPinIcon(pin.count, scale)}
-            eventHandlers={{
-              click: () => onPinClick?.(pin),
-            }}
-          >
-            <Tooltip direction="top" offset={[0, -8]} opacity={1}>
-              <span className="font-mono text-xs">
-                {[pin.city, pin.country_code].filter(Boolean).join(", ") || "Unknown"}
-                {" · "}
-                <strong>{formatNumber(pin.count)}</strong>
-              </span>
-            </Tooltip>
-            <Popup>
-              <div className="min-w-[220px] text-sm">
-                <div className="flex items-center justify-between gap-3 border-b border-gray-700/60 pb-2 mb-2">
-                  <span className="font-semibold text-gray-100">
-                    {[pin.city, pin.country_name].filter(Boolean).join(", ") || "Unknown location"}
-                  </span>
-                  {pin.country_code && (
-                    <span className="shrink-0 rounded border border-gray-600/60 bg-gray-800 px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-gray-300">
-                      {pin.country_code}
-                    </span>
-                  )}
-                </div>
-                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
-                  <dt className="text-gray-500">Source IP</dt>
-                  <dd className="font-mono text-gray-200">{pin.latest_src_ip}</dd>
-                  <dt className="text-gray-500">Attacks</dt>
-                  <dd
-                    className="font-mono font-semibold tabular-nums"
-                    style={{ color: gradeFor(pin.count, scale).color }}
-                  >
-                    {formatNumber(pin.count)}
-                  </dd>
-                  <dt className="text-gray-500">Last seen</dt>
-                  <dd className="text-gray-300">
-                    {pin.latest_timestamp ? formatTimestamp(pin.latest_timestamp) : "—"}
-                  </dd>
-                  <dt className="text-gray-500">Last event</dt>
-                  <dd className="font-mono text-gray-300">
-                    {pin.latest_event_id?.replace("cowrie.", "") ?? "—"}
-                  </dd>
-                </dl>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
-      </MarkerClusterGroup>
+      <ClusterLayer pins={pins} scale={scale} onPinClick={onPinClick} />
     </MapContainer>
   );
 }
