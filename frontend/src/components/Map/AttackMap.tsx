@@ -132,15 +132,20 @@ export default function AttackMap({
       zoomControl={false}
       scrollWheelZoom={true}
     >
+      {/* Esri Dark Gray Canvas: key-free dark basemap. Native tiles stop at z16,
+          so Leaflet upscales beyond that instead of fetching placeholder tiles. */}
       <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        url="https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png"
+        attribution='Tiles &copy; <a href="https://www.esri.com/">Esri</a> &mdash; Esri, DeLorme, NAVTEQ'
+        url="https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+        className="basemap-dim"
+        maxNativeZoom={16}
         noWrap={true}
       />
       {/* Place labels above the basemap but below markers, dimmed so pins stay dominant */}
       <Pane name="labels" style={{ zIndex: 210, pointerEvents: "none" }}>
         <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png"
+          url="https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}"
+          maxNativeZoom={16}
           noWrap={true}
           opacity={0.55}
         />

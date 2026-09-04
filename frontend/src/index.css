@@ -13,9 +13,15 @@
 /* ── Leaflet: dark chrome ──────────────────────────────────────── */
 
 .leaflet-container {
-  /* Matches the CARTO dark-matter ocean so max-bounds edges are seamless */
-  background: #262626 !important;
+  /* Matches the dimmed Esri ocean so max-bounds edges are seamless */
+  background: #18181b !important;
   font-family: inherit;
+}
+
+/* Esri Dark Gray Canvas renders lighter than the old CARTO basemap, so dim it
+   to keep attack pins dominant. Labels live in their own pane, unaffected. */
+.basemap-dim {
+  filter: brightness(0.7) contrast(1.05);
 }
 
 .leaflet-marker-icon:focus-visible {
