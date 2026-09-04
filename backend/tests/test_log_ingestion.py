@@ -345,6 +345,83 @@ class TestProcessFileDownload:
         # Attempt should still be created
         assert db.query(Attempt).count() == 1
 
+    @pytest.mark.parametrize("shasum", [
+        "../../../../etc/passwd",   # traversal — reaches a VT URL path
+        "a" * 63,                   # too short
+        "a" * 65,                   # too long
+        "z" * 64,                   # right length, not hex
+        "a" * 32,                   # md5, not sha256
+    ])
+    def test_malformed_shasum_yields_no_captured_file(self, db, shasum):
+        db.add(Session(session_id="s1", src_ip="1.2.3.4",
+                       start_time=datetime(2025, 6, 15), protocol="ssh"))
+        db.commit()
+
+        event = {
+            "eventid": "cowrie.session.file_download",
+            "session": "s1",
+            "src_ip": "1.2.3.4",
+            "timestamp": "2025-06-15T10:00:00Z",
+            "url": "http://evil.com/x",
+            "shasum": shasum,
+        }
+        with _patch_geoip():
+            _, captured_id = _process_event(event, db)
+
+        assert captured_id is None
+        assert db.query(CapturedFile).count() == 0
+        assert db.query(Attempt).count() == 1
+
+    def test_shasum_normalized_to_lowercase(self, db):
+        event = {
+            "eventid": "cowrie.session.file_download",
+            "session": "s1",
+            "src_ip": "1.2.3.4",
+            "timestamp": "2025-06-15T10:00:00Z",
+            "url": "http://evil.com/x",
+            "shasum": "A" * 64,
+        }
+        with _patch_geoip():
+            payload, captured_id = _process_event(event, db)
+
+        cf = db.query(CapturedFile).filter_by(id=captured_id).first()
+        assert cf.sha256 == "a" * 64
+        assert payload["sha256"] == "a" * 64
+
+    def test_remote_sensor_path_is_not_stored(self, db):
+        """A remote sensor's samples live on that sensor, so a path it reports
+        must never become one the hub reads from its own disk."""
+        event = {
+            "eventid": "cowrie.session.file_download",
+            "session": "s1",
+            "src_ip": "1.2.3.4",
+            "timestamp": "2025-06-15T10:00:00Z",
+            "url": "http://evil.com/malware.sh",
+            "shasum": "b" * 64,
+            "outfile": "/app/backend/.env",
+        }
+        with _patch_geoip():
+            _, captured_id = _process_event(event, db, "taipei-01")
+
+        cf = db.query(CapturedFile).filter_by(id=captured_id).first()
+        assert cf.local_path == ""
+
+    def test_locally_tailed_path_is_kept(self, db):
+        event = {
+            "eventid": "cowrie.session.file_download",
+            "session": "s1",
+            "src_ip": "1.2.3.4",
+            "timestamp": "2025-06-15T10:00:00Z",
+            "url": "http://evil.com/malware.sh",
+            "shasum": "c" * 64,
+            "outfile": "var/lib/cowrie/downloads/" + "c" * 64,
+        }
+        with _patch_geoip():
+            _, captured_id = _process_event(event, db, trusted_paths=True)
+
+        cf = db.query(CapturedFile).filter_by(id=captured_id).first()
+        assert cf.local_path == "var/lib/cowrie/downloads/" + "c" * 64
+
 
 # ---------------------------------------------------------------------------
 # _process_event — session.closed

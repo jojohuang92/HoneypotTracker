@@ -48,25 +48,37 @@ def _was_already_submitted(db, sha256: str) -> bool:
     )
 
 
+def _within(path: Path, root: Path) -> bool:
+    """True if ``path`` is inside ``root`` once symlinks are resolved."""
+    try:
+        path.resolve().relative_to(root)
+    except (ValueError, OSError):
+        return False
+    return True
+
+
 def _resolve_file_path(local_path: str, sha256: str) -> Path | None:
     """Locate a captured file on disk.
 
     Cowrie logs 'outfile' relative to its own working directory, so the
     stored path usually doesn't resolve from here. Cowrie names downloads
     by their sha256, so fall back to <cowrie_downloads_dir>/<sha256>.
+
+    Whatever this returns gets uploaded to VirusTotal, so when a downloads
+    directory is configured the result must resolve inside it — no absolute
+    path, traversal, or symlink may lead anywhere else. Without one there is
+    nothing to confine against, and the literal path is used; that is reached
+    only by locally-tailed events, since remote ones store no path at all.
     """
-    path = Path(local_path)
-    if path.is_absolute():
-        return path if path.exists() else None
-
     if settings.cowrie_downloads_dir:
-        for candidate in (
-            Path(settings.cowrie_downloads_dir) / sha256,
-            Path(settings.cowrie_downloads_dir) / path.name,
-        ):
-            if candidate.exists():
+        root = Path(settings.cowrie_downloads_dir).resolve()
+        path = Path(local_path)
+        for candidate in (root / sha256, root / path.name, path):
+            if _within(candidate, root) and candidate.exists():
                 return candidate
+        return None
 
+    path = Path(local_path)
     return path if path.exists() else None
 
 

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app.models import Attempt, Sensor
+from app.models import Attempt, CapturedFile, Sensor
 from app.services import sensor_registry
 from tests.conftest import make_sensor
 
@@ -100,6 +100,54 @@ class TestIngestAttribution:
         assert row.intent == "brute_force"
         assert row.mitre_id == "T1110"
         assert row.country_name != "Narnia"
+
+    def test_sensor_cannot_make_the_hub_read_a_local_file(
+        self, client, db_session, sensor
+    ):
+        """The sample sits on the sensor, so a path it reports is never one the
+        hub will open — otherwise the VT reporter would upload whatever it named."""
+        event = {
+            "eventid": "cowrie.session.file_download",
+            "session": "remote-sess-2",
+            "src_ip": "1.2.3.9",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "url": "http://evil.example/x.sh",
+            "shasum": "d" * 64,
+            "outfile": "/app/backend/.env",
+        }
+        resp = client.post(
+            "/api/ingest",
+            json=batch([event]),
+            headers={"X-Sensor-Key": TOKEN},
+        )
+        assert resp.status_code == 200
+
+        captured = db_session.query(CapturedFile).filter_by(sha256="d" * 64).one()
+        assert captured.local_path == ""
+        # An empty path is what keeps the row out of the VT upload queue.
+        assert (
+            db_session.query(CapturedFile)
+            .filter(CapturedFile.local_path.isnot(None), CapturedFile.local_path != "")
+            .count()
+            == 0
+        )
+
+    def test_sensor_cannot_forge_a_hash(self, client, db_session, sensor):
+        """A malformed hash reaches a VirusTotal URL path, so it is dropped."""
+        event = {
+            "eventid": "cowrie.session.file_download",
+            "session": "remote-sess-3",
+            "src_ip": "1.2.3.9",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "url": "http://evil.example/y.sh",
+            "shasum": "../../../../etc/passwd",
+        }
+        client.post(
+            "/api/ingest",
+            json=batch([event]),
+            headers={"X-Sensor-Key": TOKEN},
+        )
+        assert db_session.query(CapturedFile).count() == 0
 
     def test_updates_liveness(self, client, db_session, sensor):
         client.post(

@@ -10,6 +10,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -43,6 +44,21 @@ def _is_private_ip(ip: str) -> bool:
         return ipaddress.ip_address(ip).is_private
     except ValueError:
         return False
+
+
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def _normalized_sha256(value) -> str:
+    """Return a lowercase hex sha256, or "" if the value isn't one.
+
+    Validated at the ingestion boundary rather than at each use: the hash
+    reaches a VirusTotal URL path and a filesystem lookup downstream, and for
+    events arriving over /api/ingest it is whatever the sensor sent.
+    """
+    if not isinstance(value, str) or not _SHA256_RE.match(value):
+        return ""
+    return value.lower()
 
 
 def _parse_timestamp(ts_str: str) -> datetime:
@@ -159,13 +175,23 @@ def _attempt_exists(
 
 
 def _process_event(
-    event: dict, db: DBSession, sensor_id: str | None = None
+    event: dict,
+    db: DBSession,
+    sensor_id: str | None = None,
+    *,
+    trusted_paths: bool = False,
 ) -> tuple[dict | None, int | None]:
     """Process a single Cowrie JSON event.
 
     ``sensor_id`` attributes the event to a sensor; it defaults to this hub's
     own. Geolocation and intent are always derived here, never taken from the
     payload, so a compromised remote sensor cannot forge either.
+
+    ``trusted_paths`` says whether ``outfile`` names a file on *this* host. It
+    holds only for the Cowrie log this hub tails itself, where Cowrie writes
+    the path. Events arriving over /api/ingest describe files on the sensor's
+    disk, so their paths are dropped rather than stored — otherwise a sensor
+    could name any local file and have the VT reporter upload it.
 
     Returns (sse_payload, captured_file_id). Either value may be None.
     """
@@ -299,7 +325,7 @@ def _process_event(
     # --- File download/upload ---
     elif event_id in ("cowrie.session.file_download", "cowrie.session.file_upload"):
         url = event.get("url", event.get("destfile", ""))
-        sha256 = event.get("shasum", "")
+        sha256 = _normalized_sha256(event.get("shasum", ""))
         filename = event.get("outfile", event.get("filename", ""))
         command = f"download: {url}" if url else f"upload: {filename}"
 
@@ -336,7 +362,7 @@ def _process_event(
                 filename=os.path.basename(filename) if filename else "",
                 url=url,
                 sha256=sha256,
-                local_path=event.get("outfile", ""),
+                local_path=event.get("outfile", "") if trusted_paths else "",
             )
             db.add(captured)
             db.flush()
@@ -377,15 +403,23 @@ def _process_event(
 
 
 def process_batch(
-    events: list[dict], db: DBSession, sensor_id: str | None = None
+    events: list[dict],
+    db: DBSession,
+    sensor_id: str | None = None,
+    *,
+    trusted_paths: bool = False,
 ) -> list[tuple[dict | None, int | None]]:
     """Process a batch of Cowrie events and mark the sensor as having reported.
 
     Shared by local log tailing and remote sensor ingestion so both paths
-    normalize, enrich, and classify identically.
+    normalize, enrich, and classify identically. Only the local tailer passes
+    ``trusted_paths`` — see :func:`_process_event`.
     """
     sensor_id = sensor_id or settings.sensor_id
-    results = [_process_event(event, db, sensor_id) for event in events]
+    results = [
+        _process_event(event, db, sensor_id, trusted_paths=trusted_paths)
+        for event in events
+    ]
 
     # One liveness write per batch rather than per event.
     if any(payload for payload, _ in results):
@@ -468,7 +502,10 @@ async def tail_cowrie_log(log_path: str):
 
                 db = SessionLocal()
                 try:
-                    for sse_payload, captured_id in process_batch(batch, db):
+                    # Cowrie wrote these paths on this host, so they may be read.
+                    for sse_payload, captured_id in process_batch(
+                        batch, db, trusted_paths=True
+                    ):
                         _dispatch(sse_payload, captured_id)
                 finally:
                     db.close()
