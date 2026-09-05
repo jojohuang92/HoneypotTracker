@@ -5,11 +5,13 @@ depend on it would rot the moment cleanup runs.
 """
 
 import json
+import os
 import struct
 
 import pytest
 
 from app.services.static_analysis import (
+    SampleUnreadable,
     analyze,
     analyze_path,
     extract_iocs,
@@ -247,3 +249,31 @@ class TestToColumns:
         cols = to_columns(analyze(b"harmless text file contents"))
         assert json.loads(cols["yara_matches"]) == []
         assert cols["malware_family"] is None
+
+
+class TestUnreadableSamples:
+    """A sample that exists but cannot be read is a host problem, not a verdict.
+
+    Cowrie's SFTP/SCP upload path renames its mkstemp file into the downloads
+    directory without a chmod, so those samples land as 0600 owned by the
+    container's user and this process cannot open them. That is fixable, so it
+    must be reported differently from a sample that is genuinely gone.
+    """
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file permissions")
+    def test_unreadable_file_raises(self, tmp_path):
+        p = tmp_path / "denied"
+        p.write_bytes(b"\x7fELF payload")
+        p.chmod(0o000)
+        with pytest.raises(SampleUnreadable):
+            analyze_path(p)
+
+    def test_missing_file_is_not_treated_as_unreadable(self, tmp_path):
+        """Gone is terminal; unreadable is not. They must not collapse together."""
+        assert analyze_path(tmp_path / "nope") is None
+
+    def test_directory_is_reported_as_unreadable(self, tmp_path):
+        d = tmp_path / "adir"
+        d.mkdir()
+        with pytest.raises(SampleUnreadable):
+            analyze_path(d)

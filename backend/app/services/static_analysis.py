@@ -36,6 +36,20 @@ MIN_STRING_LEN = 6
 MAX_STRINGS = 20_000
 MAX_IOCS_PER_KIND = 64
 
+
+class SampleUnreadable(Exception):
+    """A sample is on disk but this process cannot read it.
+
+    Kept distinct from a missing sample on purpose. Cowrie's SFTP/SCP upload
+    path renames its mkstemp file into the downloads directory without a
+    chmod, so those samples arrive as 0600 owned by the container's user —
+    unreadable here, and roughly two thirds of what gets captured. That is a
+    host permissions problem which someone can fix, and once fixed the bytes
+    are still there to analyze. Treating it like a deleted sample retires the
+    hash forever and quietly loses the payload.
+    """
+
+
 ELF_MAGIC = b"\x7fELF"
 PT_INTERP = 3
 
@@ -321,7 +335,12 @@ def analyze(data: bytes) -> dict:
 
 
 def analyze_path(path) -> dict | None:
-    """Analyze a file on disk, or None if it cannot be read.
+    """Analyze a file on disk.
+
+    Returns None when there is nothing to analyze and never will be: the
+    sample is gone, or it is empty. Raises :class:`SampleUnreadable` when the
+    bytes are there but this process cannot get at them — a fixable problem
+    with the host, which the caller must not mistake for a verdict.
 
     The caller is responsible for having confined ``path`` to the downloads
     directory — see services/vt_reporter._resolve_file_path.
@@ -329,8 +348,13 @@ def analyze_path(path) -> dict | None:
     try:
         with open(path, "rb") as fh:
             data = fh.read(MAX_READ_BYTES)
-    except (OSError, ValueError):
+    except FileNotFoundError:
         return None
+    except ValueError:
+        # An unopenable path (embedded NUL, say). Nothing to retry.
+        return None
+    except OSError as exc:
+        raise SampleUnreadable(str(exc)) from exc
     if not data:
         return None
     return analyze(data)
@@ -386,11 +410,22 @@ def analyze_captured_file(file_id: int) -> bool:
             return False
 
         path = _resolve_file_path(captured.local_path or "", captured.sha256 or "")
-        result = analyze_path(path) if path else None
+        try:
+            result = analyze_path(path) if path else None
+        except SampleUnreadable as exc:
+            # Leave the row pending: the bytes are still on disk, so once the
+            # permissions are fixed the next pass picks the sample up. Loud,
+            # because until someone fixes them nothing here makes progress.
+            logger.warning(
+                "Cannot read captured file %s (%s) — leaving it for a later pass",
+                (captured.sha256 or "")[:12], exc,
+            )
+            return False
+
         if result is None:
-            # The sample is gone or unreadable. Mark it examined so the worker
-            # does not retry it forever, but leave yara_matches NULL so the
-            # cleanup script still treats it as un-analyzed.
+            # Gone, or empty: no later pass can do better. Mark it examined so
+            # the worker does not retry it forever, but leave yara_matches NULL
+            # so the cleanup script still treats it as un-analyzed.
             captured.static_analyzed_at = datetime.utcnow()
             db.commit()
             return False

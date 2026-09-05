@@ -1,6 +1,7 @@
 """Storing static-analysis results: batching, deduplication, failure handling."""
 
 import json
+import os
 from datetime import datetime
 
 import pytest
@@ -126,3 +127,41 @@ class TestAnalyzeCapturedFile:
         monkeypatch.setattr(static_analysis, "SessionLocal", lambda: db_session)
         monkeypatch.setattr(db_session, "close", lambda: None)
         assert static_analysis.analyze_captured_file(999999) is False
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file permissions")
+    def test_unreadable_sample_is_left_pending(self, db_session, tmp_path, monkeypatch):
+        """A permissions problem is fixable — writing the sample off loses it forever.
+
+        Cowrie's SFTP upload path leaves samples 0600, so this is the common
+        case, not a corner one. Stamping static_analyzed_at here would retire
+        the hash permanently and no later fix could bring it back.
+        """
+        sample = tmp_path / SHA_A
+        sample.write_bytes(b"\x7fELF payload")
+        sample.chmod(0o000)
+        f = add_file(db_session, SHA_A)
+        monkeypatch.setattr(static_analysis, "SessionLocal", lambda: db_session)
+        monkeypatch.setattr(db_session, "close", lambda: None)
+        monkeypatch.setattr(
+            "app.services.vt_reporter._resolve_file_path", lambda p, s: sample
+        )
+
+        assert static_analysis.analyze_captured_file(f.id) is False
+        db_session.refresh(f)
+        assert f.static_analyzed_at is None
+        assert pending_file_ids(db_session) == [f.id]
+
+    def test_empty_sample_is_marked_examined(self, db_session, tmp_path, monkeypatch):
+        """Readable and empty is a real answer: there is nothing to find, ever."""
+        sample = tmp_path / SHA_A
+        sample.write_bytes(b"")
+        f = add_file(db_session, SHA_A)
+        monkeypatch.setattr(static_analysis, "SessionLocal", lambda: db_session)
+        monkeypatch.setattr(db_session, "close", lambda: None)
+        monkeypatch.setattr(
+            "app.services.vt_reporter._resolve_file_path", lambda p, s: sample
+        )
+
+        assert static_analysis.analyze_captured_file(f.id) is False
+        db_session.refresh(f)
+        assert f.static_analyzed_at is not None

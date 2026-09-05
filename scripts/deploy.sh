@@ -69,6 +69,39 @@ if grep -q "$DEV_TREE/backend" "$UNIT"; then
   NEED_RESTART=1
 fi
 
+# --- captured-sample permissions timer ----------------------------------------
+# Cowrie's SFTP upload path writes samples 0600, which the API cannot read. See
+# scripts/sample-perms.sh. Installed from the release checkout so the units are
+# version-controlled rather than hand-made on the host.
+install_unit() {
+  local src="$1" dest="$2"
+  if ! sudo cmp -s "$src" "$dest"; then
+    sudo install -m 0644 -o root -g root "$src" "$dest"
+    echo "Installed $dest"
+    return 0
+  fi
+  return 1
+}
+
+UNITS_CHANGED=0
+if ! sudo cmp -s "$RELEASE/scripts/sample-perms.sh" /usr/local/sbin/honeypot-sample-perms.sh; then
+  sudo install -m 0755 -o root -g root \
+    "$RELEASE/scripts/sample-perms.sh" /usr/local/sbin/honeypot-sample-perms.sh
+  echo "Installed /usr/local/sbin/honeypot-sample-perms.sh"
+fi
+for unit in honeypot-sample-perms.service honeypot-sample-perms.timer; do
+  install_unit "$RELEASE/scripts/systemd/$unit" "/etc/systemd/system/$unit" && UNITS_CHANGED=1
+done
+if [[ "$UNITS_CHANGED" == 1 ]]; then
+  sudo systemctl daemon-reload
+fi
+if ! systemctl is-enabled --quiet honeypot-sample-perms.timer 2>/dev/null; then
+  sudo systemctl enable --now honeypot-sample-perms.timer
+  echo "Enabled honeypot-sample-perms.timer"
+elif [[ "$UNITS_CHANGED" == 1 ]]; then
+  sudo systemctl restart honeypot-sample-perms.timer
+fi
+
 # --- restart + health check ---------------------------------------------------
 if ! systemctl is-active --quiet honeypot-api; then
   NEED_RESTART=1

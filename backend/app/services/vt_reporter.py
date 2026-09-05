@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
+from sqlalchemy import func
 
 from app.config import settings
 from app.database import SessionLocal
@@ -33,6 +34,25 @@ ENRICH_RETRY_WINDOW = timedelta(days=2)
 # Max enrichment re-queries per scan cycle (keeps within VT rate limits)
 ENRICH_BATCH = 5
 
+# Give up on a hash after this many failed uploads inside UPLOAD_RETRY_WINDOW.
+# Dedup below only recognises a *successful* submission, so without a cap a
+# sample that can never be uploaded — bytes deleted by retention, or written
+# 0600 by Cowrie's SFTP path — is retried every SCAN_INTERVAL forever. In
+# production one hash reached 42,769 failed attempts and the audit table grew
+# to 51 MB of rows all recording the same error.
+#
+# The window is what makes this safe to apply to a permanent-looking failure:
+# the cause is often the host rather than the sample, so every hash gets a
+# fresh handful of attempts once the window rolls past instead of being
+# blacklisted on evidence collected while something else was broken.
+MAX_UPLOAD_ATTEMPTS = 5
+UPLOAD_RETRY_WINDOW = timedelta(days=7)
+
+# Failures that say "try again later" rather than "this file is not uploadable".
+# Throttling is a fact about the account, not the sample, so it must not burn
+# one of the attempts above.
+TRANSIENT_FAILURE_MARKERS = ("Rate limit",)
+
 
 def _was_already_submitted(db, sha256: str) -> bool:
     """Check if this hash was already submitted to VT."""
@@ -46,6 +66,33 @@ def _was_already_submitted(db, sha256: str) -> bool:
         .first()
         is not None
     )
+
+
+def _spent_attempts(db, sha256: str) -> bool:
+    """True once a hash has used up its upload attempts for now.
+
+    Counts only failures the sample itself is responsible for — see
+    TRANSIENT_FAILURE_MARKERS — and only recent ones, so a hash blocked by a
+    problem that has since been fixed comes back on its own.
+    """
+    transient = None
+    for marker in TRANSIENT_FAILURE_MARKERS:
+        match = ReportLog.detail.contains(marker)
+        transient = match if transient is None else transient | match
+    countable = ReportLog.detail.is_(None) | ~transient
+
+    failures = (
+        db.query(func.count(ReportLog.id))
+        .filter(
+            ReportLog.report_type == "virustotal",
+            ReportLog.identifier == sha256,
+            ReportLog.success.is_(False),
+            ReportLog.reported_at >= datetime.utcnow() - UPLOAD_RETRY_WINDOW,
+            countable,
+        )
+        .scalar()
+    ) or 0
+    return failures >= MAX_UPLOAD_ATTEMPTS
 
 
 def _within(path: Path, root: Path) -> bool:
@@ -143,16 +190,20 @@ async def auto_report_files():
                     if cf.sha256 in seen_hashes:
                         continue
                     seen_hashes.add(cf.sha256)
-                    if not _was_already_submitted(db, cf.sha256):
-                        to_submit.append((cf.id, cf.sha256, cf.local_path, cf.filename or ""))
+                    if _was_already_submitted(db, cf.sha256):
+                        continue
+                    if _spent_attempts(db, cf.sha256):
+                        continue
+                    to_submit.append((cf.id, cf.sha256, cf.local_path, cf.filename or ""))
             finally:
                 db.close()
 
             for file_id, sha256, local_path, filename in to_submit:
                 db = SessionLocal()
                 try:
-                    # Re-check dedup
-                    if _was_already_submitted(db, sha256):
+                    # Re-check dedup and the attempt budget: this batch takes
+                    # minutes to work through at API_DELAY per upload.
+                    if _was_already_submitted(db, sha256) or _spent_attempts(db, sha256):
                         continue
 
                     success, detail = await asyncio.to_thread(

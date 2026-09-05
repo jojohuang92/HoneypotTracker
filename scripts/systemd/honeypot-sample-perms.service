@@ -1,0 +1,33 @@
+[Unit]
+Description=Make Cowrie captured samples readable by the honeypot API
+Documentation=file:/home/jopi/HoneypotTracker-release/scripts/sample-perms.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/honeypot-sample-perms.sh /home/jopi/docker/cowrie/var/lib/cowrie/downloads
+
+# The downloads directory is world-writable and holds attacker-supplied files,
+# so this runs as root with the smallest surface that still lets it chgrp and
+# chmod files it does not own. ReadWritePaths is the important one: even if a
+# sample were swapped for a symlink mid-run, there is nothing outside this
+# directory the unit could write to.
+ProtectSystem=strict
+ReadWritePaths=/home/jopi/docker/cowrie/var/lib/cowrie/downloads
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=none
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
