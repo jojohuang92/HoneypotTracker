@@ -109,9 +109,19 @@ class CapturedFile(Base):
     vt_positives = Column(Integer)
     vt_total = Column(Integer)
     vt_link = Column(String)
-    yara_matches = Column(Text)  # JSON array
+    yara_matches = Column(Text)  # JSON array of matched rule names
     malware_family = Column(String)
-    analyzed_at = Column(DateTime)
+    analyzed_at = Column(DateTime)  # VirusTotal; see services/virustotal.py
+
+    # Local static analysis. Kept separate from analyzed_at because the two
+    # run independently: a sample can be VT-analyzed but not yet dissected
+    # here, and the raw bytes may not be deleted until both have run.
+    arch = Column(String)  # ELF machine, e.g. "MIPS", "ARM", "x86-64"
+    elf_bits = Column(Integer)  # 32 or 64
+    elf_endian = Column(String)  # "little" | "big"
+    elf_static = Column(Boolean)  # statically linked (no PT_INTERP)
+    static_iocs = Column(Text)  # JSON: {"ipv4": [...], "domains": [...], "urls": [...]}
+    static_analyzed_at = Column(DateTime)
 
     created_at = Column(DateTime, server_default=func.now())
 

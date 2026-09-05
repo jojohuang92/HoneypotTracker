@@ -19,6 +19,7 @@ from app.routers import (
 )
 from app.services.log_ingestion import tail_cowrie_log
 from app.services.sensor_health import sensor_health_worker
+from app.services.static_analysis import static_analysis_worker
 from app.services.sensor_registry import ensure_local_sensor
 from app.services.ip_lookup import auto_lookup_ips
 from app.services.abuse_reporter import auto_report_ips
@@ -91,6 +92,10 @@ async def lifespan(app: FastAPI):
         sensor_health_task = asyncio.create_task(sensor_health_worker())
         background_tasks.append(sensor_health_task)
         logger.info("Sensor health worker started")
+
+        static_analysis_task = asyncio.create_task(static_analysis_worker())
+        background_tasks.append(static_analysis_task)
+        logger.info("Static analysis worker started")
 
     yield
 

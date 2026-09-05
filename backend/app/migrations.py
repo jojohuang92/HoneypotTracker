@@ -77,6 +77,32 @@ def run_migrations(engine: Engine, local_sensor_id: str) -> list[str]:
                 )
             )
 
+        # Local static analysis columns. Added after captured_files shipped, so
+        # existing rows carry NULL and are simply treated as not yet analyzed.
+        if "captured_files" in present:
+            existing = _columns(conn, "captured_files")
+            for column, ddl in (
+                ("arch", "arch VARCHAR"),
+                ("elf_bits", "elf_bits INTEGER"),
+                ("elf_endian", "elf_endian VARCHAR"),
+                ("elf_static", "elf_static BOOLEAN"),
+                ("static_iocs", "static_iocs TEXT"),
+                ("static_analyzed_at", "static_analyzed_at DATETIME"),
+            ):
+                if column in existing:
+                    continue
+                conn.execute(text(f"ALTER TABLE captured_files ADD COLUMN {ddl}"))
+                applied.append(f"captured_files.{column}")
+
+            # The analysis worker repeatedly asks for the oldest unanalyzed
+            # rows; without this it scans the whole table each pass.
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_captured_files_static_analyzed_at "
+                    "ON captured_files (static_analyzed_at)"
+                )
+            )
+
     if applied:
         logger.info("Applied migrations: %s", ", ".join(applied))
     return applied
