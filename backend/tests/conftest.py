@@ -15,6 +15,16 @@ from app.models import Attempt, CapturedFile, Sensor, Session, IPScore, PageView
 LOCAL_SENSOR = settings.sensor_id
 
 
+@pytest.fixture(autouse=True)
+def _clear_export_cache():
+    """Feed bodies are cached in-process; a test must never see another's."""
+    from app.services.export_cache import export_cache
+
+    export_cache.clear()
+    yield
+    export_cache.clear()
+
+
 # ---------------------------------------------------------------------------
 # Database fixtures
 #

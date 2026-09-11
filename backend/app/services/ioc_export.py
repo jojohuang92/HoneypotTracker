@@ -6,7 +6,7 @@ import csv
 import io
 import uuid
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from ipaddress import ip_address
 
@@ -14,6 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session as DBSession
 
 from app.models import Attempt, CapturedFile
+from app.services.ip_intel import intel_for_ips
 
 
 @dataclass
@@ -24,6 +25,9 @@ class IpIoc:
     count: int
     intent: str
     country: str | None
+    # Infrastructure tags from services/ip_intel (tor, vpn, proxy, cloud,
+    # scanner, ...). Empty when the IP has not been looked up.
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -97,6 +101,8 @@ def collect_iocs(db: DBSession, cutoff: datetime) -> IocSet:
     for src_ip, intent, n in intent_rows:
         intents_by_ip.setdefault(src_ip, Counter())[intent] = n
 
+    exportable = [row for row in ip_rows if _is_exportable_ip(row[0])]
+    intel = intel_for_ips(db, [row[0] for row in exportable])
     ips = [
         IpIoc(
             value=src_ip,
@@ -105,9 +111,9 @@ def collect_iocs(db: DBSession, cutoff: datetime) -> IocSet:
             count=n,
             intent=_dominant_intent(intents_by_ip.get(src_ip, Counter())),
             country=country,
+            tags=intel[src_ip].tags if src_ip in intel else [],
         )
-        for src_ip, first, last, n, country in ip_rows
-        if _is_exportable_ip(src_ip)
+        for src_ip, first, last, n, country in exportable
     ]
     ips.sort(key=lambda i: ip_address(i.value))
 
@@ -170,16 +176,54 @@ def _iso_z(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def build_blocklist(iocs: IocSet, days: int, generated_at: datetime) -> str:
-    """One IP per line; '#' comment header with provenance."""
+def build_blocklist(iocs: IocSet, days: int, generated_at: datetime,
+                    exclude_tor: bool = False) -> str:
+    """One IP per line; '#' comment header with provenance.
+
+    ``exclude_tor`` drops known Tor exit nodes: blocking one blocks every Tor
+    user behind it, and the attacker's real origin is not that address. The
+    header says whether they were dropped so a consumer can tell the two
+    feeds apart.
+    """
+    ips = iocs.ips
+    if exclude_tor:
+        ips = [ip for ip in ips if "tor" not in ip.tags]
     lines = [
         "# HoneypotTracker blocklist",
         f"# generated_at: {_iso_z(generated_at)}",
         f"# window_days: {days}",
-        f"# count: {len(iocs.ips)}",
+        f"# count: {len(ips)}",
+        f"# tor_exits: {'excluded' if exclude_tor else 'included'}",
     ]
-    lines += [ip.value for ip in iocs.ips]
+    lines += [ip.value for ip in ips]
     return "\n".join(lines) + "\n"
+
+
+def build_top_attackers(iocs: IocSet, days: int, generated_at: datetime,
+                        limit: int) -> dict:
+    """Most active source IPs in the window as a JSON document.
+
+    Ranked by attempt count; ties fall back to most recently seen. Meant for
+    scripted consumers, so the shape is flat and every field is present.
+    """
+    ranked = sorted(iocs.ips, key=lambda i: (-i.count, -i.last_seen.timestamp()))
+    return {
+        "generated_at": _iso_z(generated_at),
+        "window_days": days,
+        "count": min(limit, len(ranked)),
+        "attackers": [
+            {
+                "ip": ip.value,
+                "attempts": ip.count,
+                "first_seen": _iso_z(ip.first_seen),
+                "last_seen": _iso_z(ip.last_seen),
+                "intent": ip.intent,
+                "country": ip.country,
+                "tags": ip.tags,
+            }
+            for ip in ranked[:limit]
+        ],
+    }
 
 
 def build_csv(iocs: IocSet) -> str:
@@ -190,7 +234,8 @@ def build_csv(iocs: IocSet) -> str:
     for ip in iocs.ips:
         writer.writerow([
             "ip", ip.value, _iso_z(ip.first_seen), _iso_z(ip.last_seen),
-            ip.count, ip.intent, ip.country or "", "",
+            ip.count, ip.intent, ip.country or "",
+            f"tags={';'.join(ip.tags)}" if ip.tags else "",
         ])
     for h in iocs.hashes:
         extra_parts = []

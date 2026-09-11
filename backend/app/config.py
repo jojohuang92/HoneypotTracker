@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     rate_limit_default: str = "60/minute"
     rate_limit_stream: str = "10/minute"
 
+    # ── Public feeds (/api/export) ───────────────────────────────────────
+    # Feed bodies are rebuilt at most this often and served with a matching
+    # Cache-Control max-age, so a fleet of firewalls polling the blocklist
+    # costs one aggregate query per window, not one per subscriber. 0 = off.
+    export_cache_seconds: int = 300
+
     # ── IP intel enrichment (Shodan InternetDB + Tor exit list) ──────────
     # Keyless and free, so on by default; off keeps the hub from making any
     # outbound lookup it was not given a key for.
