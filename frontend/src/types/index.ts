@@ -133,6 +133,9 @@ export interface UniqueIP {
   sensor_count: number;
   threat_score: number | null;
   threat_level: string | null;
+  /** Infrastructure tags from Shodan InternetDB / the Tor exit list. */
+  tags: string[];
+  open_ports: number[];
 }
 
 export interface SessionSummary {
@@ -170,6 +173,10 @@ export interface AttackerProfile {
   threat_components: Record<string, number>;
   threat_reasons: string[];
   sensors_seen: string[];
+  tags: string[];
+  open_ports: number[];
+  hostnames: string[];
+  vulns: string[];
 }
 
 export interface SearchResult {

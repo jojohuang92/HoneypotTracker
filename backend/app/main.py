@@ -22,6 +22,7 @@ from app.services.sensor_health import sensor_health_worker
 from app.services.static_analysis import static_analysis_worker
 from app.services.sensor_registry import ensure_local_sensor
 from app.services.ip_lookup import auto_lookup_ips
+from app.services.ip_intel import ip_intel_worker
 from app.services.abuse_reporter import auto_report_ips
 from app.services.reclassify import reclassify_worker
 from app.services.retention import retention_worker
@@ -85,6 +86,10 @@ async def lifespan(app: FastAPI):
         vt_report_task = asyncio.create_task(auto_report_files())
         background_tasks.append(vt_report_task)
         logger.info("VirusTotal auto-reporter started")
+
+        ip_intel_task = asyncio.create_task(ip_intel_worker())
+        background_tasks.append(ip_intel_task)
+        logger.info("IP intel worker started")
 
         retention_task = asyncio.create_task(retention_worker())
         background_tasks.append(retention_task)

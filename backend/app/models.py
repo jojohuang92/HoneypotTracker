@@ -167,6 +167,30 @@ class IPScore(Base):
     fetched_at = Column(DateTime, server_default=func.now())
 
 
+class IPIntel(Base):
+    """Infrastructure context for an attacking IP, from free keyless sources.
+
+    Shodan InternetDB says what the attacker's own host exposes (open ports,
+    product CPEs, hostnames, known CVEs) and tags it (vpn, proxy, tor, cloud,
+    scanner, compromised, ...). The Tor Project's bulk exit list is the
+    authority on ``is_tor``. Rows are refreshed on a TTL, and a lookup that
+    returned nothing is still recorded (``found`` False) so it is not retried
+    every pass. See services/ip_intel.py.
+    """
+
+    __tablename__ = "ip_intel"
+
+    ip = Column(String, primary_key=True)
+    found = Column(Boolean, default=False, nullable=False)
+    tags = Column(Text)       # JSON array of InternetDB tags
+    ports = Column(Text)      # JSON array of ints
+    hostnames = Column(Text)  # JSON array
+    cpes = Column(Text)       # JSON array
+    vulns = Column(Text)      # JSON array of CVE ids
+    is_tor = Column(Boolean, default=False, nullable=False)
+    fetched_at = Column(DateTime, nullable=False)
+
+
 class PageView(Base):
     __tablename__ = "page_views"
 

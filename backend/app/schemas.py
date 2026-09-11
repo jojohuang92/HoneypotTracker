@@ -117,6 +117,22 @@ class UniqueIP(BaseModel):
     # Only populated when scoring is requested (see /api/ips?scored=true).
     threat_score: int | None = None
     threat_level: str | None = None
+    # Infrastructure context (see services/ip_intel): promoted tags such as
+    # tor / vpn / proxy / cloud / scanner, and what the host itself exposes.
+    tags: list[str] = []
+    open_ports: list[int] = []
+
+
+class IPIntelOut(BaseModel):
+    ip: str
+    found: bool = False
+    tags: list[str] = []
+    open_ports: list[int] = []
+    hostnames: list[str] = []
+    cpes: list[str] = []
+    vulns: list[str] = []
+    is_tor: bool = False
+    fetched_at: datetime | None = None
 
 
 class PaginatedAttempts(BaseModel):
@@ -166,6 +182,11 @@ class AttackerProfile(BaseModel):
     threat_components: dict[str, int] = {}
     threat_reasons: list[str] = []
     sensors_seen: list[str] = []
+    # Attacker infrastructure, when the intel worker has looked the IP up.
+    tags: list[str] = []
+    open_ports: list[int] = []
+    hostnames: list[str] = []
+    vulns: list[str] = []
 
 
 # -- Search --

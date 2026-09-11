@@ -46,6 +46,40 @@ const SCORE_FILTERS: { value: ScoreFilter; label: string; color: string }[] = [
   { value: "unknown", label: "Unknown", color: "text-gray-500" },
 ];
 
+/** Tags that change how an indicator should be read get a colour of their own. */
+function tagClass(tag: string): string {
+  if (tag === "tor") return "text-purple-300 bg-purple-950/60 border-purple-800";
+  if (tag === "vpn" || tag === "proxy") return "text-sky-300 bg-sky-950/60 border-sky-800";
+  if (tag === "compromised" || tag === "malware" || tag === "c2")
+    return "text-red-300 bg-red-950/60 border-red-800";
+  if (tag === "scanner" || tag === "honeypot")
+    return "text-amber-300 bg-amber-950/60 border-amber-800";
+  return "text-gray-300 bg-gray-800 border-gray-700";
+}
+
+export function IntelTags({ tags, ports }: { tags: string[]; ports?: number[] }) {
+  if (tags.length === 0 && (!ports || ports.length === 0)) {
+    return <span className="text-gray-600">—</span>;
+  }
+  return (
+    <span className="flex flex-wrap gap-1">
+      {tags.map((t) => (
+        <span key={t} className={`text-[9px] rounded border px-1 py-px leading-tight ${tagClass(t)}`}>
+          {t}
+        </span>
+      ))}
+      {ports && ports.length > 0 && (
+        <span
+          className="text-[9px] rounded border px-1 py-px leading-tight text-gray-400 bg-gray-800/60 border-gray-700"
+          title={`Open ports on the attacker host: ${ports.join(", ")}`}
+        >
+          {ports.length} port{ports.length === 1 ? "" : "s"}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function matchesScoreFilter(score: number | null, filter: ScoreFilter): boolean {
   if (filter === "all") return true;
   if (filter === "unknown") return score === null;
@@ -147,7 +181,7 @@ export default function IPAddresses() {
       </div>
 
       <div className="bg-gray-800/50 rounded-lg border border-gray-700/50 overflow-x-auto">
-        <table className="text-xs min-w-[700px]">
+        <table className="text-xs min-w-[800px]">
           <thead className="sticky top-0 bg-gray-900 z-10">
             <tr className="border-b border-gray-700">
               <th className="text-left p-2 text-gray-400 font-medium">IP Address</th>
@@ -157,6 +191,7 @@ export default function IPAddresses() {
               <th className="text-right p-2 text-gray-400 font-medium">Abuse Score</th>
               <th className="text-right p-2 text-gray-400 font-medium">Reports</th>
               <th className="text-left p-2 text-gray-400 font-medium">ISP</th>
+              <th className="text-left p-2 text-gray-400 font-medium">Infra</th>
               <th className="text-left p-2 text-gray-400 font-medium">Last Seen</th>
             </tr>
           </thead>
@@ -223,6 +258,9 @@ export default function IPAddresses() {
                 </td>
                 <td className="p-2 text-gray-400 whitespace-nowrap">
                   {ip.isp || "—"}
+                </td>
+                <td className="p-2 min-w-[90px]">
+                  <IntelTags tags={ip.tags} ports={ip.open_ports} />
                 </td>
                 <td className="p-2 text-gray-400 whitespace-nowrap">
                   {ip.latest_timestamp ? formatTimestamp(ip.latest_timestamp) : "—"}

@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     rate_limit_default: str = "60/minute"
     rate_limit_stream: str = "10/minute"
 
+    # ── IP intel enrichment (Shodan InternetDB + Tor exit list) ──────────
+    # Keyless and free, so on by default; off keeps the hub from making any
+    # outbound lookup it was not given a key for.
+    ip_intel_enabled: bool = True
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
     @field_validator("cors_origins", mode="before")

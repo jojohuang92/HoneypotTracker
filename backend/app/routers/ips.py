@@ -5,10 +5,11 @@ from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import func, desc
 
 from app.database import get_db
-from app.models import Attempt, IPScore
+from app.models import Attempt, IPIntel, IPScore
 from app.rate_limit import limiter
-from app.schemas import ThreatScore, UniqueIP
+from app.schemas import IPIntelOut, ThreatScore, UniqueIP
 from app.services.abuseipdb import RateLimitedError, fetch_and_cache_score
+from app.services.ip_intel import intel_for_ips, summarize
 from app.services.threat_score import score_ip, score_ips
 
 router = APIRouter()
@@ -51,11 +52,13 @@ def list_unique_ips(
         for s in db.query(IPScore).filter(IPScore.ip.in_(ips)).all()
     }
     threat = score_ips(db, ips) if scored else {}
+    intel = intel_for_ips(db, ips)
 
     result = []
     for r in rows:
         score_row = cached.get(r.src_ip)
         ts = threat.get(r.src_ip)
+        ii = intel.get(r.src_ip)
         result.append(UniqueIP(
             src_ip=r.src_ip,
             count=r.count,
@@ -70,9 +73,34 @@ def list_unique_ips(
             sensor_count=r.sensor_count or 0,
             threat_score=ts.total if ts else None,
             threat_level=ts.level if ts else None,
+            tags=ii.tags if ii else [],
+            open_ports=ii.open_ports if ii else [],
         ))
 
     return result
+
+
+@router.get("/{ip}/intel", response_model=IPIntelOut)
+@limiter.limit("60/minute")
+def ip_intel(request: Request, ip: str, db: DBSession = Depends(get_db)):
+    """Infrastructure context for one IP: tags, exposed ports, CVEs, Tor.
+
+    Never triggers a lookup — the background worker owns the upstream rate
+    budget. An IP the worker has not reached yet answers with empty fields.
+    """
+    row = db.query(IPIntel).filter(IPIntel.ip == ip).first()
+    summary = summarize(row, ip)
+    return IPIntelOut(
+        ip=ip,
+        found=bool(row.found) if row else False,
+        tags=summary.tags,
+        open_ports=summary.open_ports,
+        hostnames=summary.hostnames,
+        cpes=summary.cpes,
+        vulns=summary.vulns,
+        is_tor=summary.is_tor,
+        fetched_at=summary.fetched_at,
+    )
 
 
 @router.get("/{ip}/threat", response_model=ThreatScore)

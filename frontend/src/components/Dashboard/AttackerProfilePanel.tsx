@@ -6,6 +6,7 @@ import { formatTimestamp, intentColor, intentLabel } from "../../utils/formatter
 import type { AttackerProfile } from "../../types";
 import Skeleton from "../common/Skeleton";
 import EmptyState from "../common/EmptyState";
+import { IntelTags } from "./IPAddresses";
 
 function StatBox({ label, value, color = "text-white" }: { label: string; value: string | number; color?: string }) {
   return (
@@ -188,6 +189,44 @@ export default function AttackerProfilePanel() {
                 </ul>
               )}
             </div>
+
+            {/* What the attacker's own host exposes (Shodan InternetDB + Tor list) */}
+            {(profile.tags.length > 0 || profile.open_ports.length > 0 ||
+              profile.hostnames.length > 0 || profile.vulns.length > 0) && (
+              <div className="bg-gray-800/50 rounded-lg p-3 border border-gray-700/50">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[10px] text-gray-500 uppercase tracking-wider">
+                    Attacker infrastructure
+                  </div>
+                  <IntelTags tags={profile.tags} />
+                </div>
+                {profile.open_ports.length > 0 && (
+                  <div className="text-[11px] text-gray-400 mt-2">
+                    <span className="text-gray-500">Open ports: </span>
+                    <span className="font-mono text-gray-300">{profile.open_ports.join(", ")}</span>
+                  </div>
+                )}
+                {profile.hostnames.length > 0 && (
+                  <div className="text-[11px] text-gray-400 mt-1 break-all">
+                    <span className="text-gray-500">Hostnames: </span>
+                    <span className="font-mono text-gray-300">{profile.hostnames.slice(0, 5).join(", ")}</span>
+                  </div>
+                )}
+                {profile.vulns.length > 0 && (
+                  <div className="text-[11px] text-gray-400 mt-1">
+                    <span className="text-gray-500">Known CVEs on host: </span>
+                    <span className="font-mono text-red-300">
+                      {profile.vulns.slice(0, 6).join(", ")}
+                      {profile.vulns.length > 6 && ` +${profile.vulns.length - 6}`}
+                    </span>
+                    <div className="text-[10px] text-gray-600 mt-0.5">
+                      A brute-forcer running vulnerable services is usually itself a compromised host.
+                    </div>
+                  </div>
+                )}
+                <div className="text-[10px] text-gray-600 mt-1.5">Source: Shodan InternetDB · Tor Project exit list</div>
+              </div>
+            )}
 
             {/* Stats grid */}
             <div className="grid grid-cols-4 gap-2">

@@ -67,3 +67,36 @@ class TestLookupIPScore:
     def test_rejects_loopback(self, client, db_session):
         resp = client.post("/api/ips/127.0.0.1/score")
         assert resp.status_code == 400
+
+
+class TestIntel:
+    def test_list_carries_tags_and_ports(self, client, db_session):
+        from app.services.ip_intel import parse_internetdb, store_intel
+        make_attempt(db_session, src_ip="1.1.1.1")
+        make_attempt(db_session, src_ip="2.2.2.2", session_id="s2")
+        store_intel(db_session, "1.1.1.1",
+                    parse_internetdb({"tags": ["vpn", "self-signed"], "ports": [22, 443]}))
+
+        data = {r["src_ip"]: r for r in client.get("/api/ips").json()}
+        assert data["1.1.1.1"]["tags"] == ["vpn"]
+        assert data["1.1.1.1"]["open_ports"] == [22, 443]
+        assert data["2.2.2.2"]["tags"] == []
+
+    def test_intel_endpoint(self, client, db_session):
+        from app.services.ip_intel import parse_internetdb, store_intel
+        store_intel(db_session, "1.1.1.1", parse_internetdb({
+            "ports": [22], "vulns": ["CVE-2024-6387"], "hostnames": ["h.example"],
+            "cpes": ["cpe:/a:openbsd:openssh:9.6"],
+        }))
+
+        body = client.get("/api/ips/1.1.1.1/intel").json()
+        assert body["found"] is True
+        assert body["vulns"] == ["CVE-2024-6387"]
+        assert body["hostnames"] == ["h.example"]
+        assert body["is_tor"] is False
+
+        unknown = client.get("/api/ips/9.9.9.9/intel").json()
+        assert unknown == {
+            "ip": "9.9.9.9", "found": False, "tags": [], "open_ports": [],
+            "hostnames": [], "cpes": [], "vulns": [], "is_tor": False, "fetched_at": None,
+        }
