@@ -29,6 +29,7 @@ An SSH honeypot records everything an attacker types, but the raw logs are noise
 - 📤 **IOC export** — attacker IPs, malware hashes, and URLs as a plaintext blocklist, CSV, or STIX 2.1 bundle (`/api/export/*`, deterministic STIX ids for consumer-side dedup).
 - 🔔 **Push alerts** — [ntfy](https://ntfy.sh) / Discord notifications for high-signal events: successful logins, captured malware, VirusTotal detections, and first-seen countries, with per-key cooldowns to stop alert storms.
 - 🧹 **Data retention** — optional pruning of raw events after N days, with per-day aggregates preserved forever so long-term trends survive on small hosts (e.g. a Raspberry Pi SD card).
+- 💾 **Verified backups** — a daily systemd timer snapshots the database through SQLite's `VACUUM INTO` (consistent while the API keeps serving), packs it with `.env` and the captured samples into a checksummed zstd archive, and rotates the last 7. `scripts/restore.sh` restores one with digest and integrity verification; CI exercises both scripts end to end.
 - 🔐 **Secured admin surface** — header-based admin auth (constant-time comparison) and per-route rate limiting.
 - 🐳 **One-command deploy** — `docker compose up` builds and runs backend + dashboard behind nginx; CI runs the full test suite on every push.
 
@@ -135,6 +136,56 @@ source venv/bin/activate
 pytest
 ```
 
+## Operations
+
+### Backups
+
+A `honeypot-backup.timer` unit runs `scripts/backup.sh` daily. Each run writes one
+self-contained archive to `~/honeypot-data/backups/`:
+
+```
+honeypot-20260911T052212Z.tar.zst          # database + .env + captured samples
+honeypot-20260911T052212Z.tar.zst.sha256
+```
+
+The database is copied with SQLite's `VACUUM INTO` rather than `cp`, because the
+database runs in WAL mode — recently committed rows live in `honeypot.db-wal`, so
+a file copy would silently produce a backup missing them. The copy is verified with
+`PRAGMA integrity_check` before it is packed; a snapshot that fails verification is
+discarded and the existing rotation is left untouched. Each archive carries a
+`MANIFEST.json` with per-table row counts, the database digest, and the deployed git
+SHA. The 7 newest are kept. On a Raspberry Pi 5, a 724 MB database takes ~43 s and
+packs to ~153 MB.
+
+Archives contain both secrets and live attacker malware: they are written `0600` in a
+`0700` directory and are never extracted automatically.
+
+Run one by hand at any time — the API keeps serving throughout:
+
+```bash
+scripts/backup.sh
+```
+
+### Restore
+
+```bash
+scripts/restore.sh latest
+```
+
+Verifies the archive against its sidecar, checks the extracted database against the
+manifest digest and `integrity_check`, stops the API, moves the current database aside
+as `honeypot.db.pre-restore-<timestamp>` (never deletes it), installs the snapshot,
+restarts, and polls `/api/health`.
+
+It restores the database alone by default — in a real recovery `.env` and the sample
+directory are usually current and must not be rolled back underneath a running system.
+Add `--with-env` / `--with-samples` to restore those too, and `--force` to overwrite a
+database that has been modified since the snapshot was taken.
+
+> **Note:** backups land on the same SD card as the data. That covers a bad migration,
+> a corrupting bug, or an accidental delete — not the card failing. An off-device copy
+> is the next step, and must encrypt before it transmits.
+
 ## Project structure
 
 ```
@@ -154,6 +205,12 @@ frontend/
     components/     # Dashboard panels, charts, map
     hooks/          # useSSE, useAttempts
     utils/          # API client, formatters
+scripts/
+  deploy.sh         # production deploy, run by the self-hosted CI runner
+  backup.sh         # daily verified snapshot (database + .env + samples)
+  restore.sh        # restore a snapshot, with verification and a rollback copy
+  notify-failure.sh # ntfy alert for a failed scheduled unit
+  systemd/          # version-controlled units, installed by deploy.sh
 ```
 
 ## Roadmap

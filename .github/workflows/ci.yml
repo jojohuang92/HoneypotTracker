@@ -24,6 +24,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # The backup/restore tests drive the real scripts, which pack with zstd.
+      - name: Ensure zstd is available
+        run: |
+          if ! command -v zstd >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y zstd
+          fi
+
       - name: Run tests
         run: pytest -q
 

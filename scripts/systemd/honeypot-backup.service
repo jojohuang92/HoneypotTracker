@@ -1,0 +1,40 @@
+[Unit]
+Description=Snapshot the honeypot database, .env, and captured samples
+Documentation=file:/home/jopi/HoneypotTracker-release/scripts/backup.sh
+OnFailure=honeypot-backup-failed.service
+
+[Service]
+Type=oneshot
+User=jopi
+Group=jopi
+ExecStart=/home/jopi/HoneypotTracker-release/scripts/backup.sh
+
+# The snapshot competes with live ingestion for one SD card, and nothing is
+# waiting on it, so it yields to the API on both CPU and I/O.
+Nice=10
+IOSchedulingClass=idle
+
+# The database is copied through SQLite (VACUUM INTO), which opens the source
+# read-write and may touch its -wal/-shm — hence honeypot-data is writable
+# rather than read-only. Everything else it reads is not.
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/jopi/honeypot-data
+ReadOnlyPaths=/home/jopi/docker/cowrie/var/lib/cowrie/downloads /home/jopi/HoneypotTracker-release
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+# It reads local files and writes local files. It has no business on a network.
+PrivateNetwork=yes
+RestrictAddressFamilies=none
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native

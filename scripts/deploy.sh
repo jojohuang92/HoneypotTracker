@@ -89,18 +89,26 @@ if ! sudo cmp -s "$RELEASE/scripts/sample-perms.sh" /usr/local/sbin/honeypot-sam
     "$RELEASE/scripts/sample-perms.sh" /usr/local/sbin/honeypot-sample-perms.sh
   echo "Installed /usr/local/sbin/honeypot-sample-perms.sh"
 fi
-for unit in honeypot-sample-perms.service honeypot-sample-perms.timer; do
+
+# --- daily database snapshot --------------------------------------------------
+# backup.sh and notify-failure.sh run as jopi straight from the release
+# checkout, so there is nothing to copy into /usr/local/sbin — only the units.
+for unit in honeypot-sample-perms.service honeypot-sample-perms.timer \
+            honeypot-backup.service honeypot-backup.timer \
+            honeypot-backup-failed.service; do
   install_unit "$RELEASE/scripts/systemd/$unit" "/etc/systemd/system/$unit" && UNITS_CHANGED=1
 done
 if [[ "$UNITS_CHANGED" == 1 ]]; then
   sudo systemctl daemon-reload
 fi
-if ! systemctl is-enabled --quiet honeypot-sample-perms.timer 2>/dev/null; then
-  sudo systemctl enable --now honeypot-sample-perms.timer
-  echo "Enabled honeypot-sample-perms.timer"
-elif [[ "$UNITS_CHANGED" == 1 ]]; then
-  sudo systemctl restart honeypot-sample-perms.timer
-fi
+for timer in honeypot-sample-perms.timer honeypot-backup.timer; do
+  if ! systemctl is-enabled --quiet "$timer" 2>/dev/null; then
+    sudo systemctl enable --now "$timer"
+    echo "Enabled $timer"
+  elif [[ "$UNITS_CHANGED" == 1 ]]; then
+    sudo systemctl restart "$timer"
+  fi
+done
 
 # --- restart + health check ---------------------------------------------------
 if ! systemctl is-active --quiet honeypot-api; then

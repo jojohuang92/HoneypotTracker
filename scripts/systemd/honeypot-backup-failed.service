@@ -1,0 +1,26 @@
+[Unit]
+Description=Alert that the honeypot backup failed
+Documentation=file:/home/jopi/HoneypotTracker-release/scripts/notify-failure.sh
+
+[Service]
+Type=oneshot
+User=jopi
+Group=jopi
+ExecStart=/home/jopi/HoneypotTracker-release/scripts/notify-failure.sh honeypot-backup.service
+
+# Unlike the backup itself, this one exists to reach the network.
+ProtectSystem=strict
+ProtectHome=read-only
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
