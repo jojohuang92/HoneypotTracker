@@ -32,18 +32,34 @@ BATCH = 500
 SYNTHETIC_PREFIXES = ("download: ", "upload: ")
 
 
-def reclassify_unknown(db: DBSession, limit: int = BATCH) -> int:
-    """Re-classify up to ``limit`` unknown commands. Returns how many changed."""
+def reclassify_unknown(
+    db: DBSession, limit: int = BATCH, after_id: int = 0
+) -> tuple[int, int | None]:
+    """Re-classify one batch of unknown commands.
+
+    Returns ``(changed, cursor)``, where ``cursor`` is the highest row id
+    examined — pass it back as ``after_id`` to continue — or ``None`` once the
+    scan has run off the end of the table.
+
+    The cursor is what makes the scan finish. Rows the rules still abstain on
+    keep ``intent = 'unknown'``, so they stay in the candidate set no matter
+    how many times they are examined; paging by id steps over them, while
+    re-querying from the start would keep handing back the same ones.
+    """
     candidates = (
         db.query(Attempt)
         .filter(
             Attempt.intent == "unknown",
             Attempt.command.isnot(None),
             Attempt.command != "",
+            Attempt.id > after_id,
         )
+        .order_by(Attempt.id)
         .limit(limit)
         .all()
     )
+    if not candidates:
+        return 0, None
 
     updated = 0
     for attempt in candidates:
@@ -61,24 +77,25 @@ def reclassify_unknown(db: DBSession, limit: int = BATCH) -> int:
 
     if updated:
         db.commit()
-    return updated
+    return updated, candidates[-1].id
 
 
 def run_reclassify_pass() -> int:
     """One full pass over the backlog. Returns the total number changed.
 
-    Terminates when a batch changes nothing. Rows the rules still abstain on
-    stay ``unknown`` and are simply offered again on the next startup, which is
-    what makes a later rule improvement reach them without any extra machinery.
+    Ends by reaching the end of the table, never by a batch changing nothing:
+    a batch made up entirely of commands the rules abstain on is normal, and
+    treating it as the end strands every classifiable row behind it.
     """
     total = 0
+    cursor = 0
     while True:
         db = SessionLocal()
         try:
-            changed = reclassify_unknown(db)
+            changed, cursor = reclassify_unknown(db, limit=BATCH, after_id=cursor)
         finally:
             db.close()
-        if not changed:
+        if cursor is None:
             return total
         total += changed
 
