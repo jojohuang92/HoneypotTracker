@@ -126,16 +126,17 @@ export interface AttemptFilters {
   countries?: string[];
   events?: string[];
   intents?: string[];
+  protocols?: string[];
 }
 
-export function useAttempts(
-  page = 1,
-  limit = 50,
+/** Query string for a filter set — shared by the table and the CSV export so
+ *  the download always contains exactly what the table showed. */
+export function attemptFilterParams(
   filters?: AttemptFilters,
   days = 0,
   sensor?: string | null,
-) {
-  let params = `page=${page}&limit=${limit}`;
+): string {
+  let params = "";
   if (days) params += `&days=${days}`;
   if (sensor) params += `&sensor=${encodeURIComponent(sensor)}`;
   if (filters?.countries?.length) {
@@ -147,6 +148,29 @@ export function useAttempts(
   if (filters?.intents?.length) {
     params += filters.intents.map((i) => `&intent=${encodeURIComponent(i)}`).join("");
   }
+  if (filters?.protocols?.length) {
+    params += filters.protocols.map((p) => `&protocol=${encodeURIComponent(p)}`).join("");
+  }
+  return params;
+}
+
+export function attemptsExportUrl(
+  filters?: AttemptFilters,
+  days = 0,
+  sensor?: string | null,
+): string {
+  const params = attemptFilterParams(filters, days, sensor).replace(/^&/, "");
+  return `/api/attempts/export.csv${params ? `?${params}` : ""}`;
+}
+
+export function useAttempts(
+  page = 1,
+  limit = 50,
+  filters?: AttemptFilters,
+  days = 0,
+  sensor?: string | null,
+) {
+  const params = `page=${page}&limit=${limit}` + attemptFilterParams(filters, days, sensor);
   return useAPI<PaginatedAttempts>(`/attempts?${params}`, {
     items: [],
     total: 0,
@@ -159,6 +183,7 @@ export interface FilterOptions {
   countries: { code: string; name: string }[];
   events: string[];
   intents: string[];
+  protocols: string[];
 }
 
 export function useFilterOptions() {
@@ -166,6 +191,7 @@ export function useFilterOptions() {
     countries: [],
     events: [],
     intents: [],
+    protocols: [],
   });
 }
 

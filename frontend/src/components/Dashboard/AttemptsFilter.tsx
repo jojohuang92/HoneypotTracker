@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import type { FilterOptions, AttemptFilters } from "../../hooks/useAttempts";
 import { intentLabel, intentColor } from "../../utils/formatters";
 
-type FilterTab = "country" | "event" | "intent";
+type FilterTab = "country" | "event" | "intent" | "protocol";
 
 interface AttemptsFilterProps {
   options: FilterOptions;
@@ -35,7 +35,8 @@ export default function AttemptsFilter({
   const activeCount =
     (filters.countries?.length || 0) +
     (filters.events?.length || 0) +
-    (filters.intents?.length || 0);
+    (filters.intents?.length || 0) +
+    (filters.protocols?.length || 0);
 
   function toggleValue(
     key: keyof AttemptFilters,
@@ -56,6 +57,7 @@ export default function AttemptsFilter({
     { key: "country", label: "Location", count: filters.countries?.length || 0 },
     { key: "event", label: "Event", count: filters.events?.length || 0 },
     { key: "intent", label: "Intent", count: filters.intents?.length || 0 },
+    { key: "protocol", label: "Protocol", count: filters.protocols?.length || 0 },
   ];
 
   const lowerSearch = search.toLowerCase();
@@ -153,6 +155,15 @@ export default function AttemptsFilter({
             selected={filters.intents || []}
             search={lowerSearch}
             onToggle={(val) => toggleValue("intents", val)}
+          />
+        )}
+        {tab === "protocol" && (
+          <CheckboxList
+            items={options.protocols
+              .filter((p) => p.toLowerCase().includes(lowerSearch))
+              .map((p) => ({ value: p, label: p.toUpperCase() }))}
+            selected={filters.protocols || []}
+            onToggle={(val) => toggleValue("protocols", val)}
           />
         )}
       </div>

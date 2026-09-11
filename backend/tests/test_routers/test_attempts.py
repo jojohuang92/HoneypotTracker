@@ -102,3 +102,76 @@ class TestFilterOptions:
         assert "CN" in codes
         assert "cowrie.login.failed" in data["events"]
         assert "cryptomining" in data["intents"]
+
+
+class TestProtocolAndPortFilters:
+    def test_filter_by_protocol_case_insensitive(self, client, db_session):
+        make_attempt(db_session, protocol="ssh", dst_port=22, session_id="s1")
+        make_attempt(db_session, protocol="telnet", dst_port=23, session_id="s2")
+
+        data = client.get("/api/attempts?protocol=TELNET").json()
+        assert data["total"] == 1
+        assert data["items"][0]["protocol"] == "telnet"
+
+    def test_filter_by_port(self, client, db_session):
+        make_attempt(db_session, protocol="ssh", dst_port=22, session_id="s1")
+        make_attempt(db_session, protocol="telnet", dst_port=23, session_id="s2")
+
+        assert client.get("/api/attempts?port=23").json()["total"] == 1
+        assert client.get("/api/attempts?port=22&port=23").json()["total"] == 2
+        assert client.get("/api/attempts?port=abc").status_code == 422
+
+    def test_filter_options_include_protocols(self, client, db_session):
+        make_attempt(db_session, protocol="ssh", session_id="s1")
+        make_attempt(db_session, protocol="telnet", session_id="s2")
+        assert client.get("/api/attempts/filter-options").json()["protocols"] == ["ssh", "telnet"]
+
+
+class TestExportCsv:
+    def test_export_matches_filters_and_order(self, client, db_session):
+        from datetime import timedelta
+        make_attempt(db_session, src_ip="1.1.1.1", country_code="US", session_id="s1",
+                     timestamp=NOW - timedelta(hours=2))
+        make_attempt(db_session, src_ip="2.2.2.2", country_code="CN", session_id="s2",
+                     timestamp=NOW - timedelta(hours=1))
+        make_attempt(db_session, src_ip="3.3.3.3", country_code="US", session_id="s3",
+                     event_id="cowrie.command.input", command="uname -a",
+                     username=None, password=None, timestamp=NOW)
+
+        resp = client.get("/api/attempts/export.csv?country=US")
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/csv")
+        assert 'attachment; filename="attempts-' in resp.headers["content-disposition"]
+        lines = resp.text.strip().splitlines()
+        assert lines[0].startswith("timestamp,sensor_id,session_id,event_id,src_ip")
+        assert len(lines) == 3
+        assert lines[1].split(",")[4] == "3.3.3.3"   # newest first
+        assert lines[2].split(",")[4] == "1.1.1.1"
+        assert "uname -a" in lines[1]
+        assert "2025-06-15T12:00:00Z" in lines[1]
+
+    def test_export_neutralises_spreadsheet_formulas(self, client, db_session):
+        make_attempt(db_session, event_id="cowrie.command.input", session_id="s1",
+                     command="=HYPERLINK(\"http://evil\")", username=None, password=None)
+        make_attempt(db_session, session_id="s2", username="-root", password="+1")
+
+        text = client.get("/api/attempts/export.csv").text
+        assert "'=HYPERLINK" in text
+        assert ",'-root,'+1," in text
+
+    def test_export_empty(self, client, db_session):
+        text = client.get("/api/attempts/export.csv").text
+        assert text.strip().splitlines() == [
+            "timestamp,sensor_id,session_id,event_id,src_ip,src_port,dst_port,protocol,"
+            "country_code,country_name,city,username,password,command,success,intent,mitre_id"
+        ]
+
+    def test_export_row_cap(self, client, db_session, monkeypatch):
+        from app.routers import attempts as attempts_router
+        monkeypatch.setattr(attempts_router, "EXPORT_MAX_ROWS", 3)
+        monkeypatch.setattr(attempts_router, "EXPORT_CHUNK", 2)
+        seed_attempts(db_session, count=5)
+
+        lines = client.get("/api/attempts/export.csv").text.strip().splitlines()
+        assert len(lines) == 4  # header + cap

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ListFilter, Inbox } from "lucide-react";
-import { useAttempts, useFilterOptions } from "../../hooks/useAttempts";
+import { ListFilter, Inbox, Download } from "lucide-react";
+import { useAttempts, useFilterOptions, attemptsExportUrl } from "../../hooks/useAttempts";
 import type { AttemptFilters } from "../../hooks/useAttempts";
 import { useTimeRange } from "../../context/TimeRangeContext";
 import { useSensorScope } from "../../context/SensorContext";
@@ -19,6 +19,7 @@ function filtersFromParams(params: URLSearchParams): AttemptFilters {
     countries: params.getAll("country"),
     events: params.getAll("event"),
     intents: params.getAll("intent"),
+    protocols: params.getAll("protocol"),
   };
 }
 
@@ -38,6 +39,7 @@ export default function AllAttemptsTable() {
     next.countries?.forEach((c) => params.append("country", c));
     next.events?.forEach((e) => params.append("event", e));
     next.intents?.forEach((i) => params.append("intent", i));
+    next.protocols?.forEach((p) => params.append("protocol", p));
     setSearchParams(params, { replace: true });
     setPage(1);
   };
@@ -48,7 +50,8 @@ export default function AllAttemptsTable() {
   const activeFilterCount =
     (filters.countries?.length || 0) +
     (filters.events?.length || 0) +
-    (filters.intents?.length || 0);
+    (filters.intents?.length || 0) +
+    (filters.protocols?.length || 0);
 
   // Scroll to top when data refreshes (new attempts arrive at top)
   useEffect(() => {
@@ -88,6 +91,16 @@ export default function AllAttemptsTable() {
             Clear
           </button>
         )}
+        {/* Same filters, same window, same sensor — the file is the table. */}
+        <a
+          href={attemptsExportUrl(filters, range.days, sensorId)}
+          download
+          className="ml-auto flex items-center gap-1.5 px-2 py-1 text-xs rounded bg-gray-800 text-gray-400 border border-gray-700 hover:text-gray-200 hover:border-gray-600 transition-colors"
+          title="Download the filtered attempts as CSV (up to 50,000 rows)"
+        >
+          <Download className="w-3 h-3" aria-hidden />
+          CSV
+        </a>
       </div>
 
       {/* Filter popup - overlays the table area */}
