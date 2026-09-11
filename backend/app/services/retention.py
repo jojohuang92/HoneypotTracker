@@ -5,8 +5,9 @@ bound. This worker writes one DailyStat row per completed UTC day — always,
 so long-term trends survive pruning — and, when ``retention_days`` > 0,
 deletes attempts, sessions, and page views older than the window.
 
-Captured-file metadata, report logs, IP scores, and daily aggregates are
-never pruned: they are small and they are the honeypot's long-term record.
+Captured-file metadata, IP scores, and daily aggregates are never pruned:
+they are small and they are the honeypot's long-term record. Report logs are
+the exception to that rule — see ``prune_report_logs``.
 """
 
 import asyncio
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import Attempt, DailyStat, PageView, Session
+from app.models import Attempt, DailyStat, PageView, ReportLog, Session
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,40 @@ def prune(db: DBSession, now: datetime | None = None) -> dict[str, int]:
     return {"attempts": attempts, "sessions": sessions, "page_views": page_views}
 
 
+def prune_report_logs(db: DBSession, now: datetime | None = None) -> int:
+    """Delete reporting audit rows past the window. No-op when disabled.
+
+    One slice of this table is not audit at all and must never be deleted: a
+    *successful* VirusTotal submission is the dedup state that stops a sample
+    being uploaded twice, and vt_reporter._was_already_submitted looks it up
+    with no time bound. Dropping one costs API quota and re-submits malware
+    that was already reported, so those are kept forever regardless of age.
+
+    Everything else ages out safely. AbuseIPDB successes are only ever read
+    through the 50 most-recently-closed sessions and a 15-minute dedup window;
+    failures only through vt_reporter's UPLOAD_RETRY_WINDOW, which is far
+    shorter than this one. The window must stay comfortably wider than that,
+    or capped-out uploads would retry the moment their failures were pruned.
+    """
+    if settings.report_log_retention_days <= 0:
+        return 0
+
+    now = now or datetime.utcnow()
+    cutoff = now - timedelta(days=settings.report_log_retention_days)
+
+    # `.is_(True)` rather than `== True`: a NULL success would make the
+    # negated AND evaluate to NULL and silently spare the row forever.
+    is_vt_success = (ReportLog.report_type == "virustotal") & ReportLog.success.is_(True)
+
+    deleted = (
+        db.query(ReportLog)
+        .filter(ReportLog.reported_at < cutoff, ~is_vt_success)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return deleted
+
+
 def run_retention_pass(now: datetime | None = None) -> None:
     """One full pass: aggregate first (so pruned days survive as stats)."""
     db = SessionLocal()
@@ -141,6 +176,13 @@ def run_retention_pass(now: datetime | None = None) -> None:
                 "older than %s days",
                 deleted["attempts"], deleted["sessions"], deleted["page_views"],
                 settings.retention_days,
+            )
+
+        reports = prune_report_logs(db, now)
+        if reports:
+            logger.info(
+                "Retention: pruned %s report logs older than %s days",
+                reports, settings.report_log_retention_days,
             )
     finally:
         db.close()

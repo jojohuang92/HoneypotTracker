@@ -245,7 +245,8 @@ class TestMigration:
         with engine.begin() as conn:
             conn.execute(text(
                 "CREATE TABLE attempts (id INTEGER PRIMARY KEY, session_id VARCHAR,"
-                " event_id VARCHAR, timestamp DATETIME, src_ip VARCHAR, protocol VARCHAR)"
+                " event_id VARCHAR, timestamp DATETIME, src_ip VARCHAR,"
+                " protocol VARCHAR, dst_port INTEGER)"
             ))
             conn.execute(text(
                 "CREATE TABLE sessions (id INTEGER PRIMARY KEY, session_id VARCHAR,"
@@ -323,3 +324,38 @@ class TestMigration:
             }
         assert {"attempts", "sessions", "captured_files"} <= tables
         engine.dispose()
+
+    def test_backfills_telnet_destination_port(self, tmp_path):
+        """Cowrie reports dst_port only on session.connect, so login and
+        command events fell through to the SSH default and filed every Telnet
+        attempt on port 22."""
+        engine = self._legacy_db(tmp_path)
+        with engine.begin() as conn:
+            for sid, proto in (("t1", "telnet"), ("s2", "ssh")):
+                conn.execute(text(
+                    "INSERT INTO attempts (session_id, event_id, timestamp,"
+                    " src_ip, protocol, dst_port) VALUES"
+                    f" ('{sid}', 'cowrie.login.failed', '2026-01-01',"
+                    f" '1.2.3.4', '{proto}', 22)"
+                ))
+
+        run_migrations(engine, "pi")
+
+        with engine.begin() as conn:
+            ports = dict(conn.execute(text(
+                "SELECT session_id, dst_port FROM attempts"
+                " WHERE session_id IN ('t1', 's2')"
+            )).fetchall())
+        assert ports["t1"] == 23
+        assert ports["s2"] == 22  # SSH rows are left alone
+
+    def test_telnet_backfill_is_idempotent(self, tmp_path):
+        engine = self._legacy_db(tmp_path)
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO attempts (session_id, event_id, timestamp, src_ip,"
+                " protocol, dst_port) VALUES"
+                " ('t1', 'cowrie.login.failed', '2026-01-01', '1.2.3.4', 'telnet', 22)"
+            ))
+        run_migrations(engine, "pi")
+        assert run_migrations(engine, "pi") == []

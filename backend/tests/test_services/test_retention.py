@@ -3,8 +3,16 @@
 from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
-from app.models import Attempt, DailyStat, PageView, Session
-from app.services.retention import aggregate_day, aggregate_missing_days, prune
+from sqlalchemy import text
+
+from app.config import settings
+from app.models import Attempt, DailyStat, PageView, ReportLog, Session
+from app.services.retention import (
+    aggregate_day,
+    aggregate_missing_days,
+    prune,
+    prune_report_logs,
+)
 from tests.conftest import make_attempt, make_session
 
 DAY = date(2025, 6, 10)
@@ -125,3 +133,78 @@ class TestPrune:
 
         assert db_session.query(Attempt).count() == 0
         assert db_session.query(DailyStat).count() == 1
+
+
+class TestPruneReportLogs:
+    """Trimming the reporting audit trail.
+
+    Most of this table is diagnostic noise nothing reads once it is a few days
+    old — but one slice of it is live state, not audit, and deleting it causes
+    real harm.
+    """
+
+    def _log(self, db, report_type, success, ago_days, detail="x"):
+        row = ReportLog(
+            report_type=report_type, identifier="i", success=success,
+            detail=detail, reported_at=NOW - timedelta(days=ago_days),
+        )
+        db.add(row)
+        db.commit()
+        return row
+
+    def test_deletes_failures_past_the_window(self, db_session):
+        self._log(db_session, "virustotal", False, 120)
+        with patch.object(settings, "report_log_retention_days", 90):
+            assert prune_report_logs(db_session, NOW) == 1
+        assert db_session.query(ReportLog).count() == 0
+
+    def test_keeps_rows_inside_the_window(self, db_session):
+        self._log(db_session, "virustotal", False, 10)
+        self._log(db_session, "abuseipdb", True, 10)
+        with patch.object(settings, "report_log_retention_days", 90):
+            assert prune_report_logs(db_session, NOW) == 0
+        assert db_session.query(ReportLog).count() == 2
+
+    def test_never_deletes_a_successful_virustotal_submission(self, db_session):
+        """Not audit — vt_reporter reads these with no time bound to avoid
+        re-uploading a sample. Deleting one costs quota and duplicates work."""
+        self._log(db_session, "virustotal", True, 3650)
+        with patch.object(settings, "report_log_retention_days", 90):
+            assert prune_report_logs(db_session, NOW) == 0
+        assert db_session.query(ReportLog).count() == 1
+
+    def test_deletes_old_abuseipdb_successes(self, db_session):
+        """Only ever read through the 50 newest closed sessions and a
+        15-minute dedup window, so old ones are genuinely dead."""
+        self._log(db_session, "abuseipdb", True, 120)
+        with patch.object(settings, "report_log_retention_days", 90):
+            assert prune_report_logs(db_session, NOW) == 1
+
+    def test_deletes_old_virustotal_failures_but_not_successes(self, db_session):
+        self._log(db_session, "virustotal", False, 120)
+        kept = self._log(db_session, "virustotal", True, 120)
+        with patch.object(settings, "report_log_retention_days", 90):
+            assert prune_report_logs(db_session, NOW) == 1
+        remaining = db_session.query(ReportLog).all()
+        assert [r.id for r in remaining] == [kept.id]
+
+    def test_null_success_is_not_mistaken_for_a_kept_submission(self, db_session):
+        """`NOT (type=vt AND success=1)` must not go NULL and spare the row.
+
+        Written through raw SQL on purpose: the column's Python-side default
+        rewrites an explicit None to True, so the ORM cannot produce the row
+        this guards against — only legacy data or a direct write can.
+        """
+        db_session.execute(text(
+            "INSERT INTO report_logs (report_type, identifier, success, detail,"
+            " reported_at) VALUES ('virustotal', 'i', NULL, 'x', '2020-01-01')"
+        ))
+        db_session.commit()
+        with patch.object(settings, "report_log_retention_days", 90):
+            assert prune_report_logs(db_session, NOW) == 1
+
+    def test_disabled_window_is_a_noop(self, db_session):
+        self._log(db_session, "abuseipdb", True, 3650)
+        with patch.object(settings, "report_log_retention_days", 0):
+            assert prune_report_logs(db_session, NOW) == 0
+        assert db_session.query(ReportLog).count() == 1

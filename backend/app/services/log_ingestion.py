@@ -75,6 +75,14 @@ def _parse_timestamp(ts_str: str) -> datetime:
         return datetime.utcnow()
 
 
+# Cowrie reports dst_port only on session.connect, and behind Docker that is
+# its own listener (2222/2223) rather than the port the attacker dialled.
+# Login and command events — nearly every attempt — carry no port at all, so
+# the field used to fall back to 22 and file Telnet attempts under SSH. The
+# protocol is always present, so the well-known port is derived from it.
+WELL_KNOWN_PORTS = {"ssh": 22, "telnet": 23}
+
+
 def _build_attempt(
     event: dict,
     event_id: str,
@@ -86,6 +94,7 @@ def _build_attempt(
     **kwargs,
 ) -> Attempt:
     """Construct an Attempt with all common fields pre-populated."""
+    protocol = event.get("protocol", "ssh")
     return Attempt(
         sensor_id=sensor_id,
         session_id=session_id,
@@ -93,8 +102,8 @@ def _build_attempt(
         timestamp=timestamp,
         src_ip=src_ip,
         src_port=event.get("src_port"),
-        dst_port=event.get("dst_port", 22),
-        protocol=event.get("protocol", "ssh"),
+        dst_port=WELL_KNOWN_PORTS.get(protocol, WELL_KNOWN_PORTS["ssh"]),
+        protocol=protocol,
         country_code=geo.country_code,
         country_name=geo.country_name,
         city=geo.city,

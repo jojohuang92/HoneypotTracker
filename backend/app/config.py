@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     # Days of raw data (attempts, sessions, page views) to keep. 0 = keep
     # forever. Daily aggregates are always written and never pruned.
     retention_days: int = 0
+    # Reporting audit trail. Unlike retention_days this defaults ON, because
+    # the two hold different kinds of data: attempts are the intel corpus this
+    # project exists to accumulate, while report logs are operational records
+    # that nothing reads after a few days. See retention.prune_report_logs.
+    report_log_retention_days: int = 90
 
     # Rate limiting
     rate_limit_default: str = "60/minute"

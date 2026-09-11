@@ -509,3 +509,44 @@ class TestDispatch:
             await asyncio.gather(*tasks)
 
         mock_vt.assert_called_once_with(42)
+
+
+class TestDestinationPort:
+    """Which port the attacker actually dialled.
+
+    Cowrie reports dst_port only on session.connect, and behind Docker that is
+    its own listener (2222/2223) rather than the published port. Login and
+    command events — nearly every attempt — carry no port at all, so the field
+    used to fall back to 22 and file every Telnet attempt under SSH.
+    """
+
+    def _login(self, db, protocol, session_id):
+        db.add(Session(session_id=session_id, src_ip="1.2.3.4",
+                       start_time=datetime(2025, 6, 15), protocol=protocol))
+        db.commit()
+        event = {
+            "eventid": "cowrie.login.failed",
+            "session": session_id,
+            "src_ip": "1.2.3.4",
+            "timestamp": "2025-06-15T10:00:00Z",
+            "username": "root",
+            "password": "toor",
+            "protocol": protocol,
+        }
+        with _patch_geoip():
+            _process_event(event, db)
+        return db.query(Attempt).filter_by(session_id=session_id).first()
+
+    def test_telnet_attempt_records_port_23(self, db):
+        assert self._login(db, "telnet", "s-telnet").dst_port == 23
+
+    def test_ssh_attempt_records_port_22(self, db):
+        assert self._login(db, "ssh", "s-ssh").dst_port == 22
+
+    def test_protocol_is_preserved_alongside_the_port(self, db):
+        assert self._login(db, "telnet", "s-both").protocol == "telnet"
+
+    def test_unknown_protocol_falls_back_to_ssh(self, db):
+        """Cowrie only speaks SSH and Telnet; anything else is a surprise."""
+        attempt = self._login(db, "gopher", "s-odd")
+        assert attempt.dst_port == 22

@@ -103,6 +103,21 @@ def run_migrations(engine: Engine, local_sensor_id: str) -> list[str]:
                 )
             )
 
+        # Telnet attempts recorded on the SSH port. Cowrie reports dst_port
+        # only on session.connect, so login and command events — nearly every
+        # attempt — fell through to a hardcoded 22. Ingestion now derives the
+        # port from the protocol; this corrects the rows written before it.
+        # Idempotent: once corrected the WHERE clause matches nothing.
+        if "attempts" in present and "dst_port" in _columns(conn, "attempts"):
+            corrected = conn.execute(
+                text(
+                    "UPDATE attempts SET dst_port = 23 "
+                    "WHERE protocol = 'telnet' AND dst_port <> 23"
+                )
+            ).rowcount
+            if corrected:
+                applied.append(f"attempts.dst_port telnet backfill ({corrected} rows)")
+
     if applied:
         logger.info("Applied migrations: %s", ", ".join(applied))
     return applied
