@@ -84,6 +84,15 @@ class Settings(BaseSettings):
     # outbound lookup it was not given a key for.
     ip_intel_enabled: bool = True
 
+    # ── URLhaus (abuse.ch) submission of captured payload URLs ───────────
+    # Auth-Key from https://auth.abuse.ch/. Unset disables submission.
+    urlhaus_auth_key: str = ""
+    # Hide the abuse.ch handle on the public URLhaus entry.
+    urlhaus_anonymous: bool = False
+    # URLhaus accepts only sites currently serving a payload. A capture proves
+    # the URL served one at capture time; older than this it is not submitted.
+    urlhaus_max_age_hours: int = 24
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
     @field_validator("cors_origins", mode="before")
@@ -130,6 +139,9 @@ class Settings(BaseSettings):
 
         if not self.abuseipdb_api_key:
             logger.info("ABUSEIPDB_API_KEY not set — IP reputation lookups disabled")
+
+        if not self.urlhaus_auth_key:
+            logger.info("URLHAUS_AUTH_KEY not set — URLhaus submission disabled")
 
 
 settings = Settings()

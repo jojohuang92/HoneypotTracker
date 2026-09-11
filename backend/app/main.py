@@ -27,6 +27,7 @@ from app.services.abuse_reporter import auto_report_ips
 from app.services.reclassify import reclassify_worker
 from app.services.retention import retention_worker
 from app.services.vt_reporter import auto_report_files
+from app.services.urlhaus_reporter import auto_report_urls
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,10 @@ async def lifespan(app: FastAPI):
         vt_report_task = asyncio.create_task(auto_report_files())
         background_tasks.append(vt_report_task)
         logger.info("VirusTotal auto-reporter started")
+
+        urlhaus_task = asyncio.create_task(auto_report_urls())
+        background_tasks.append(urlhaus_task)
+        logger.info("URLhaus auto-reporter started")
 
         ip_intel_task = asyncio.create_task(ip_intel_worker())
         background_tasks.append(ip_intel_task)
