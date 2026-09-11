@@ -6,6 +6,7 @@ import AttackMap from "./components/Map/AttackMap";
 import { threatLegend } from "./components/Map/threatScale";
 import DashboardPanel from "./components/Dashboard/DashboardPanel";
 import AboutPage from "./components/About/AboutPage";
+import MethodologyPage from "./components/About/MethodologyPage";
 import Sidebar from "./components/layout/Sidebar";
 import LiveIndicator from "./components/common/LiveIndicator";
 import { useRef, useState, useEffect, useCallback } from "react";
@@ -155,13 +156,14 @@ function App() {
     fetch("/api/stats/view", { method: "POST" }).catch(() => {});
   }, []);
 
-  // /about is the one route that owns the whole viewport: long-form text needs
+  // /about and /methodology own the whole viewport: long-form text needs
   // the width, and it has no use for the live map or the SSE feed behind it.
   return (
     <div className="h-dvh w-screen flex flex-col lg:flex-row overflow-hidden">
       <Sidebar />
       <Routes>
         <Route path="/about" element={<AboutPage />} />
+        <Route path="/methodology" element={<MethodologyPage />} />
         <Route path="*" element={<DashboardLayout />} />
       </Routes>
     </div>

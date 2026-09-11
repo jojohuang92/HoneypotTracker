@@ -15,6 +15,7 @@ import {
   Search,
   ShieldAlert,
   CircleUser,
+  BookOpen,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -62,7 +63,10 @@ const GROUPS: { label: string; items: NavItem[]; footer?: boolean }[] = [
   },
   {
     label: "About",
-    items: [{ to: "/about", label: "About", icon: CircleUser }],
+    items: [
+      { to: "/methodology", label: "Methodology", icon: BookOpen },
+      { to: "/about", label: "About", icon: CircleUser },
+    ],
     footer: true,
   },
 ];

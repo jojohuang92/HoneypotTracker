@@ -14,8 +14,8 @@ An SSH honeypot records everything an attacker types, but the raw logs are noise
 
 - **Ingests** Cowrie's JSON event log in real time and normalizes it into sessions, login attempts, commands, and captured files.
 - **Classifies** each command into an intent (reconnaissance, malware deployment, cryptomining, credential theft, persistence, sabotage) and maps it to a **MITRE ATT&CK** technique.
-- **Enriches** every source IP with GeoIP location and reputation data, and captured payloads with VirusTotal analysis.
-- **Reports** confirmed attackers to AbuseIPDB and malware samples to VirusTotal automatically, with deduplication and an audit trail.
+- **Enriches** every source IP with GeoIP location, reputation data, and infrastructure context (open ports, CVEs, Tor/VPN/proxy tags), and captured payloads with local static analysis and VirusTotal.
+- **Reports** confirmed attackers to AbuseIPDB, malware samples to VirusTotal, and payload URLs to abuse.ch URLhaus automatically, with deduplication and an audit trail.
 - **Streams** new attacks to the browser over Server-Sent Events for a live view.
 
 ## Features
@@ -24,9 +24,12 @@ An SSH honeypot records everything an attacker types, but the raw logs are noise
 - 🎯 **MITRE ATT&CK classification** — every command tagged with an intent and technique ID, shown as a coverage matrix.
 - ⚡ **Real-time dashboard** — new sessions appear instantly over SSE; no polling.
 - 🔎 **Attacker profiling & session replay** — reconstruct an attacker's full session keystroke-by-keystroke and profile behavior per IP.
-- 🛡️ **Automated threat reporting** — background workers report to AbuseIPDB and submit malware to VirusTotal, with dedup windows and a `ReportLog` audit trail.
+- 🛡️ **Automated threat reporting** — background workers report to AbuseIPDB, submit malware to VirusTotal, and submit captured payload URLs to [URLhaus](https://urlhaus.abuse.ch/), with dedup windows and a `ReportLog` audit trail. URLs go out only while their capture is fresh, matching URLhaus's live-sites-only policy.
+- 🧭 **Attacker infrastructure intel** — every source IP is looked up against Shodan InternetDB and the Tor Project exit list (both keyless): open ports, product CPEs, known CVEs on the attacker's own host, and tags like `tor` / `vpn` / `proxy` / `cloud` / `scanner`. Surfaced on the IP table, the attacker profile, and in every feed.
 - 🔌 **SIEM integration** — forwards enriched events to Splunk via HTTP Event Collector.
-- 📤 **IOC export** — attacker IPs, malware hashes, and URLs as a plaintext blocklist, CSV, or STIX 2.1 bundle (`/api/export/*`, deterministic STIX ids for consumer-side dedup).
+- 📤 **Open IOC feeds** — attacker IPs, malware hashes, and URLs as a plaintext blocklist (`?exclude_tor=true` to drop exit nodes), a ranked `top-attackers.json`, CSV, or a STIX 2.1 bundle with deterministic ids (`/api/export/*`). Bodies are cached server-side and served with `Cache-Control` + `ETag`, so a fleet of pfSense/Pi-hole pollers costs one query per window and conditional requests get a 304.
+- 🔎 **Analyst self-service** — filter attempts by country, event, intent, or protocol and download exactly that view as CSV (`/api/attempts/export.csv`, formula-safe for spreadsheets).
+- 📖 **Methodology page** — `/methodology` documents what runs, the sensor footprint, how events become intelligence, data handling and retention, the open feeds, and the corpus's limitations.
 - 🔔 **Push alerts** — [ntfy](https://ntfy.sh) / Discord notifications for high-signal events: successful logins, captured malware, VirusTotal detections, and first-seen countries, with per-key cooldowns to stop alert storms.
 - 🧹 **Data retention** — optional pruning of raw events after N days, with per-day aggregates preserved forever so long-term trends survive on small hosts (e.g. a Raspberry Pi SD card).
 - 💾 **Verified backups** — a daily systemd timer snapshots the database through SQLite's `VACUUM INTO` (consistent while the API keeps serving), packs it with `.env` and the captured samples into a checksummed zstd archive, and rotates the last 7. `scripts/restore.sh` restores one with digest and integrity verification; CI exercises both scripts end to end.
@@ -41,7 +44,7 @@ flowchart LR
     I --> DB[(SQLite / SQLAlchemy)]
     I --> CL[Intent classifier<br/>MITRE ATT&CK]
     I --> GEO[GeoIP lookup]
-    I --> EN[Threat-intel enrichment]
+    I --> EN[Threat-intel enrichment<br/>AbuseIPDB · InternetDB · Tor list]
     CL --> DB
     GEO --> DB
     EN --> DB
@@ -49,6 +52,8 @@ flowchart LR
     API --> UI[React dashboard]
     EN --> AB[AbuseIPDB reporter]
     EN --> VT[VirusTotal reporter]
+    EN --> UH[URLhaus reporter]
+    API --> FEEDS[Public feeds<br/>blocklist · STIX · CSV]
     I --> SP[Splunk HEC forwarder]
 ```
 
@@ -121,6 +126,9 @@ Configuration is read from `backend/.env` (see [`backend/.env.example`](backend/
 | `VIRUSTOTAL_API_KEY`| Enables malware submission/enrichment                         | Optional |
 | `ABUSEIPDB_API_KEY` | Enables IP reputation lookups and auto-reporting              | Optional |
 | `SPLUNK_HEC_URL` / `SPLUNK_HEC_TOKEN` | Forward enriched events to a Splunk HEC     | Optional |
+| `URLHAUS_AUTH_KEY`  | Enables submitting captured payload URLs to abuse.ch URLhaus (`URLHAUS_ANONYMOUS`, `URLHAUS_MAX_AGE_HOURS` tune it) | Optional |
+| `IP_INTEL_ENABLED`  | Keyless attacker-infrastructure lookups (Shodan InternetDB + Tor exit list); default on | Optional |
+| `EXPORT_CACHE_SECONDS` | How long `/api/export/*` bodies are cached and advertised via `Cache-Control` (default 300) | Optional |
 | `NTFY_URL` / `DISCORD_WEBHOOK_URL` | Push alerts for successful logins, malware, VT hits, new countries | Optional |
 | `RETENTION_DAYS`    | Prune raw events older than N days (0 = keep forever)        | Optional |
 
@@ -135,6 +143,24 @@ cd backend
 source venv/bin/activate
 pytest
 ```
+
+## Public feeds
+
+The IOC feeds need no account. Each accepts `?days=N` (1–365, default 30), is rebuilt at
+most every `EXPORT_CACHE_SECONDS`, and honours `If-None-Match`:
+
+| Endpoint | Content | Typical consumer |
+| -------- | ------- | ---------------- |
+| `/api/export/blocklist.txt` | One IP per line, `#` header with provenance; `?exclude_tor=true` drops Tor exits | pfSense / OPNsense aliases, Pi-hole, fail2ban |
+| `/api/export/top-attackers.json` | Sources ranked by attempts with intent, country, tags | scripts, dashboards |
+| `/api/export/iocs.csv` | IPs, SHA-256 hashes, and URLs in one file; IP rows carry `tags=…` | SIEM lookups |
+| `/api/export/stix.json` | STIX 2.1 bundle, deterministic indicator ids | MISP, OpenCTI |
+
+```bash
+curl -fsS https://honeypottracker.live/api/export/blocklist.txt?days=7 | grep -v '^#'
+```
+
+Only globally routable addresses are ever exported; private ranges are dropped at ingestion.
 
 ## Operations
 
@@ -193,8 +219,9 @@ backend/
   app/
     routers/        # FastAPI route handlers (attempts, stats, geo, malware,
                     #   stream, admin, profile, search, replay, meta, ...)
-    services/       # ingestion, classifier, geoip, ip_lookup, alerts,
-                    #   abuse_reporter, vt_reporter, splunk_forwarder, retention
+    services/       # ingestion, classifier, geoip, ip_lookup, ip_intel, alerts,
+                    #   abuse_reporter, vt_reporter, urlhaus_reporter, export_cache,
+                    #   splunk_forwarder, retention
     models.py       # SQLAlchemy models
     schemas.py      # Pydantic schemas
     config.py       # settings + startup validation

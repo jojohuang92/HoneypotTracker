@@ -240,15 +240,24 @@ export default function AboutPage() {
             stack deploys with one <code className="text-gray-300">docker compose up</code>{" "}
             behind nginx, and CI runs the test suite on every push.
           </p>
-          <a
-            href={`${GITHUB_URL}/HoneypotTracker`}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors mt-3.5"
-          >
-            <GithubMark className="w-3.5 h-3.5" />
-            Source on GitHub
-          </a>
+          <div className="flex flex-wrap items-center gap-4 mt-3.5">
+            <a
+              href={`${GITHUB_URL}/HoneypotTracker`}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              <GithubMark className="w-3.5 h-3.5" />
+              Source on GitHub
+            </a>
+            <Link
+              to="/methodology"
+              className="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              <ArrowRight className="w-3.5 h-3.5" aria-hidden />
+              Methodology, data handling and open feeds
+            </Link>
+          </div>
         </section>
 
         {/* Skills + credentials */}
