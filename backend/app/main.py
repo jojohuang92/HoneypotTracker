@@ -23,6 +23,7 @@ from app.services.static_analysis import static_analysis_worker
 from app.services.sensor_registry import ensure_local_sensor
 from app.services.ip_lookup import auto_lookup_ips
 from app.services.abuse_reporter import auto_report_ips
+from app.services.reclassify import reclassify_worker
 from app.services.retention import retention_worker
 from app.services.vt_reporter import auto_report_files
 
@@ -96,6 +97,11 @@ async def lifespan(app: FastAPI):
         static_analysis_task = asyncio.create_task(static_analysis_worker())
         background_tasks.append(static_analysis_task)
         logger.info("Static analysis worker started")
+
+        # One-shot: apply the current rules to commands classified before the
+        # rules improved. Terminates on its own once the backlog is clear.
+        reclassify_task = asyncio.create_task(reclassify_worker())
+        background_tasks.append(reclassify_task)
 
     yield
 
